@@ -1,0 +1,25 @@
+# Build output
+project/bin/*.dll
+project/bin/*.so
+project/bin/*.dylib
+*.lib
+*.exp
+*.obj
+*.pdb
+
+# SCons
+.sconsign.dblite
+.scons_temp/
+
+# godot-cpp build artifacts
+godot-cpp/bin/
+godot-cpp/gen/
+
+# Godot editor
+project/.godot/
+project/export/
+
+# VS / IDE
+.vs/
+*.user
+*.suo
