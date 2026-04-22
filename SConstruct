@@ -4,9 +4,14 @@ import sys
 
 env = SConscript("godot-cpp/SConstruct")
 
-env.Append(CPPPATH=["src/"])
+env.Append(CPPPATH=["source/"])
 
-sources = Glob("src/*.cpp")
+sources = (
+    Glob("source/*.cpp") +
+    Glob("source/geometry/*.cpp") +
+    Glob("source/commands/*.cpp") +
+    Glob("source/godot/*.cpp")
+)
 
 library = env.SharedLibrary(
     "project/bin/gomo{}{}".format(env["suffix"], env["SHLIBSUFFIX"]),

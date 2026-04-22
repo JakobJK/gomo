@@ -23,8 +23,12 @@ func _input(event: InputEvent) -> void:
 		match event.button_index:
 			MOUSE_BUTTON_LEFT:
 				_mode = Mode.ORBIT if (alt and event.pressed) else Mode.NONE
+				if alt and event.pressed:
+					get_viewport().set_input_as_handled()
 			MOUSE_BUTTON_MIDDLE:
 				_mode = Mode.PAN  if (alt and event.pressed) else Mode.NONE
+				if alt and event.pressed:
+					get_viewport().set_input_as_handled()
 			MOUSE_BUTTON_RIGHT:
 				_mode = Mode.NONE
 				if alt and event.pressed:
@@ -61,7 +65,8 @@ func _input(event: InputEvent) -> void:
 
 		# Alt + RMB drag = dolly zoom
 		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
-			_distance = clampf(_distance - event.relative.y * zoom_speed * 0.01 * _distance,
+			var delta: float = event.relative.x - event.relative.y
+			_distance = clampf(_distance - delta * zoom_speed * 0.01 * _distance,
 								min_distance, max_distance)
 			_apply_transform()
 			get_viewport().set_input_as_handled()

@@ -1,61 +1,119 @@
 extends Node3D
 
-@onready var camera: Camera3D = $Camera3D
-@onready var mesh_instance: MeshInstance3D = $MeshInstance3D
+@onready var camera: Camera3D = $perspective
 
-var hem := HalfEdgeMesh.new()
-var selected_vertex := -1
-var drag_plane := Plane()
+var mesh_objects:   Array[MeshObject] = []
+var focused_object: MeshObject        = null
 
-const PICK_RADIUS_PX := 20.0
+var _drag_object: MeshObject = null
+var _drag_plane:  Plane
+var _drag_offset: Vector3
 
 func _ready() -> void:
-	mesh_instance.transform = Transform3D.IDENTITY
-	hem.build_from_triangles(PackedVector3Array([
-		Vector3(-1.0, -1.0, 0.0),
-		Vector3( 0.0,  1.0, 0.0),
-		Vector3( 1.0, -1.0, 0.0),
-	]))
-	mesh_instance.mesh = _build_mesh()
+	get_viewport().msaa_3d = Viewport.MSAA_4X
 
-func _build_mesh() -> ArrayMesh:
-	var array_mesh := hem.to_array_mesh()
-	var mat := StandardMaterial3D.new()
-	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.8, 0.5, 0.2)
-	array_mesh.surface_set_material(0, mat)
-	return array_mesh
+	# Key light — warm, front-right, main source of specular highlights
+	var key := DirectionalLight3D.new()
+	key.rotation_degrees = Vector3(-35, 50, 0)
+	key.light_color      = Color(1.0, 0.93, 0.82)
+	key.light_energy     = 1.6
+	add_child(key)
+
+	# Fill light — cool, front-left, softens shadows
+	var fill := DirectionalLight3D.new()
+	fill.rotation_degrees = Vector3(-15, -130, 0)
+	fill.light_color      = Color(0.75, 0.85, 1.0)
+	fill.light_energy     = 0.45
+	add_child(fill)
+
+	# Rim light — back, separates the silhouette
+	var rim := DirectionalLight3D.new()
+	rim.rotation_degrees = Vector3(25, 175, 0)
+	rim.light_color      = Color(0.9, 0.92, 1.0)
+	rim.light_energy     = 0.5
+	add_child(rim)
+
+	# Ambient
+	var env := Environment.new()
+	env.background_mode        = Environment.BG_COLOR
+	env.background_color       = Color(0.1, 0.1, 0.13)
+	env.ambient_light_source   = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color    = Color(0.3, 0.32, 0.38)
+	env.ambient_light_energy   = 0.4
+	var world_env := WorldEnvironment.new()
+	world_env.environment = env
+	add_child(world_env)
+
+	var obj := _spawn_mesh_object()
+	obj.build_box()
+
+func _spawn_mesh_object() -> MeshObject:
+	var obj := MeshObject.new()
+	obj.camera = camera
+	add_child(obj)
+	mesh_objects.append(obj)
+	return obj
 
 func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo:
+		if event.keycode == KEY_N:
+			for obj in mesh_objects:
+				obj.toggle_debug_normals()
+			get_viewport().set_input_as_handled()
+			return
+
+		# Mode switching — any component mode object gets first pass
+		var mode_key := -1
+		match event.keycode:
+			KEY_1: mode_key = MeshObject.Mode.OBJECT
+			KEY_2: mode_key = MeshObject.Mode.VERTEX
+			KEY_3: mode_key = MeshObject.Mode.EDGE
+			KEY_4: mode_key = MeshObject.Mode.FACE
+		if mode_key != -1 and focused_object != null:
+			focused_object.set_mode(mode_key as MeshObject.Mode)
+			get_viewport().set_input_as_handled()
+			return
+
+	# Non-object mode objects get first pass at all events
+	for obj in mesh_objects:
+		if obj.mode != MeshObject.Mode.OBJECT:
+			if obj.handle_input(event):
+				get_viewport().set_input_as_handled()
+				return
+
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			selected_vertex = _pick_vertex(event.position)
-			if selected_vertex != -1:
-				var vpos := hem.get_vertex_position(selected_vertex)
-				drag_plane = Plane(-camera.global_basis.z, vpos)
-				get_viewport().set_input_as_handled()
+			var ray_from := camera.project_ray_origin(event.position)
+			var ray_dir  := camera.project_ray_normal(event.position)
+
+			for obj in mesh_objects:
+				if obj.mode == MeshObject.Mode.OBJECT and obj.ray_hits(ray_from, ray_dir):
+					_focus(obj)
+					_drag_plane  = Plane(-camera.global_basis.z, obj.global_position)
+					var hit: Variant = _drag_plane.intersects_ray(ray_from, ray_dir)
+					_drag_offset = (hit - obj.global_position) if hit != null else Vector3.ZERO
+					_drag_object = obj
+					get_viewport().set_input_as_handled()
+					return
+
+			# Clicked empty space — deselect in object mode
+			if focused_object != null and focused_object.mode == MeshObject.Mode.OBJECT:
+				focused_object.set_selected(false)
+				focused_object = null
+
 		else:
-			selected_vertex = -1
+			_drag_object = null
 
-	elif event is InputEventMouseMotion and selected_vertex != -1:
-		var from := camera.project_ray_origin(event.position)
-		var dir  := camera.project_ray_normal(event.position)
-		var hit: Variant = drag_plane.intersects_ray(from, dir)
+	elif event is InputEventMouseMotion and _drag_object != null:
+		var ray_from := camera.project_ray_origin(event.position)
+		var ray_dir  := camera.project_ray_normal(event.position)
+		var hit: Variant = _drag_plane.intersects_ray(ray_from, ray_dir)
 		if hit != null:
-			hem.set_vertex_position(selected_vertex, hit)
-			mesh_instance.mesh = _build_mesh()
-			get_viewport().set_input_as_handled()
+			_drag_object.global_position = hit - _drag_offset
+		get_viewport().set_input_as_handled()
 
-func _pick_vertex(mouse_pos: Vector2) -> int:
-	var positions := hem.get_vertex_positions()
-	var best_idx := -1
-	var best_dist := PICK_RADIUS_PX * PICK_RADIUS_PX
-
-	for i in positions.size():
-		var screen_pos := camera.unproject_position(positions[i])
-		var d := mouse_pos.distance_squared_to(screen_pos)
-		if d < best_dist:
-			best_dist = d
-			best_idx = i
-
-	return best_idx
+func _focus(obj: MeshObject) -> void:
+	if focused_object != null and focused_object != obj:
+		focused_object.set_selected(false)
+	focused_object = obj
+	obj.set_selected(true)
