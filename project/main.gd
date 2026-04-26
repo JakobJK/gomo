@@ -1,15 +1,14 @@
 extends Node3D
 
+const _MoveTool = preload("res://tools/move_tool.gd")
+
 @onready var camera: Camera3D = $perspective
 
 var mesh_objects:   Array[MeshObject] = []
 var focused_object: MeshObject        = null
 
-var _drag_object: MeshObject = null
-var _drag_plane:  Plane
-var _drag_offset: Vector3
-
 func _ready() -> void:
+	Keymap.setup()
 	get_viewport().msaa_3d = Viewport.MSAA_4X
 
 	# Key light — warm, front-right, main source of specular highlights
@@ -55,21 +54,27 @@ func _spawn_mesh_object() -> MeshObject:
 	return obj
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_N:
-			for obj in mesh_objects:
-				obj.toggle_debug_normals()
+	# Object-mode tool shortcuts — scene-wide, not per-object
+	if focused_object != null and focused_object.mode == MeshObject.Mode.OBJECT:
+		if event.is_action_pressed("tool_move"):
+			GlobalState.set_tool(null if GlobalState.active_tool is _MoveTool else _MoveTool.new())
+			focused_object.redraw()
+			get_viewport().set_input_as_handled()
+			return
+		if event.is_action_pressed("tool_none"):
+			GlobalState.set_tool(null)
+			focused_object.redraw()
 			get_viewport().set_input_as_handled()
 			return
 
-		# Mode switching — any component mode object gets first pass
+	# Mode switching
+	if focused_object != null:
 		var mode_key := -1
-		match event.keycode:
-			KEY_1: mode_key = MeshObject.Mode.OBJECT
-			KEY_2: mode_key = MeshObject.Mode.VERTEX
-			KEY_3: mode_key = MeshObject.Mode.EDGE
-			KEY_4: mode_key = MeshObject.Mode.FACE
-		if mode_key != -1 and focused_object != null:
+		if   event.is_action_pressed("mode_object"): mode_key = MeshObject.Mode.OBJECT
+		elif event.is_action_pressed("mode_vertex"): mode_key = MeshObject.Mode.VERTEX
+		elif event.is_action_pressed("mode_edge"):   mode_key = MeshObject.Mode.EDGE
+		elif event.is_action_pressed("mode_face"):   mode_key = MeshObject.Mode.FACE
+		if mode_key != -1:
 			focused_object.set_mode(mode_key as MeshObject.Mode)
 			get_viewport().set_input_as_handled()
 			return
@@ -81,39 +86,32 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				return
 
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed:
-			var ray_from := camera.project_ray_origin(event.position)
-			var ray_dir  := camera.project_ray_normal(event.position)
+	# Focused object in object mode gets input for tool activation and gizmo use
+	if focused_object != null and focused_object.mode == MeshObject.Mode.OBJECT:
+		if focused_object.handle_input(event):
+			get_viewport().set_input_as_handled()
+			return
 
-			for obj in mesh_objects:
-				if obj.mode == MeshObject.Mode.OBJECT and obj.ray_hits(ray_from, ray_dir):
-					_focus(obj)
-					_drag_plane  = Plane(-camera.global_basis.z, obj.global_position)
-					var hit: Variant = _drag_plane.intersects_ray(ray_from, ray_dir)
-					_drag_offset = (hit - obj.global_position) if hit != null else Vector3.ZERO
-					_drag_object = obj
-					get_viewport().set_input_as_handled()
-					return
-
-			# Clicked empty space — deselect in object mode
-			if focused_object != null and focused_object.mode == MeshObject.Mode.OBJECT:
-				focused_object.set_selected(false)
-				focused_object = null
-
-		else:
-			_drag_object = null
-
-	elif event is InputEventMouseMotion and _drag_object != null:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		var ray_from := camera.project_ray_origin(event.position)
 		var ray_dir  := camera.project_ray_normal(event.position)
-		var hit: Variant = _drag_plane.intersects_ray(ray_from, ray_dir)
-		if hit != null:
-			_drag_object.global_position = hit - _drag_offset
-		get_viewport().set_input_as_handled()
+
+		for obj in mesh_objects:
+			if obj.mode == MeshObject.Mode.OBJECT and obj.ray_hits(ray_from, ray_dir):
+				_focus(obj)
+				get_viewport().set_input_as_handled()
+				return
+
+		# Clicked empty space — deselect
+		if focused_object != null and focused_object.mode == MeshObject.Mode.OBJECT:
+			GlobalState.remove(focused_object)
+			focused_object.redraw()
+			focused_object = null
 
 func _focus(obj: MeshObject) -> void:
 	if focused_object != null and focused_object != obj:
-		focused_object.set_selected(false)
+		GlobalState.remove(focused_object)
+		focused_object.redraw()
 	focused_object = obj
-	obj.set_selected(true)
+	GlobalState.add(obj)
+	obj.redraw()

@@ -19,32 +19,29 @@ func _ready() -> void:
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
-		var alt := Input.is_key_pressed(KEY_ALT)
+		var mod := Input.is_key_pressed(Keymap.CAMERA_MODIFIER)
 		match event.button_index:
-			MOUSE_BUTTON_LEFT:
-				_mode = Mode.ORBIT if (alt and event.pressed) else Mode.NONE
-				if alt and event.pressed:
+			Keymap.CAMERA_ORBIT_BTN:
+				_mode = Mode.ORBIT if (mod and event.pressed) else Mode.NONE
+				if mod and event.pressed:
 					get_viewport().set_input_as_handled()
-			MOUSE_BUTTON_MIDDLE:
-				_mode = Mode.PAN  if (alt and event.pressed) else Mode.NONE
-				if alt and event.pressed:
+			Keymap.CAMERA_PAN_BTN:
+				_mode = Mode.PAN if (mod and event.pressed) else Mode.NONE
+				if mod and event.pressed:
 					get_viewport().set_input_as_handled()
-			MOUSE_BUTTON_RIGHT:
+			Keymap.CAMERA_DOLLY_BTN:
 				_mode = Mode.NONE
-				if alt and event.pressed:
-					_mode = Mode.NONE  # handled below via scroll-like drag
-			MOUSE_BUTTON_WHEEL_UP:
-				_distance = clampf(_distance - zoom_speed * _distance * 0.3, min_distance, max_distance)
-				_apply_transform()
-				get_viewport().set_input_as_handled()
-			MOUSE_BUTTON_WHEEL_DOWN:
-				_distance = clampf(_distance + zoom_speed * _distance * 0.3, min_distance, max_distance)
-				_apply_transform()
-				get_viewport().set_input_as_handled()
+		if event.is_action_pressed("cam_zoom_in"):
+			_distance = clampf(_distance - zoom_speed * _distance * 0.3, min_distance, max_distance)
+			_apply_transform()
+			get_viewport().set_input_as_handled()
+		elif event.is_action_pressed("cam_zoom_out"):
+			_distance = clampf(_distance + zoom_speed * _distance * 0.3, min_distance, max_distance)
+			_apply_transform()
+			get_viewport().set_input_as_handled()
 
 	elif event is InputEventMouseMotion:
-		var alt := Input.is_key_pressed(KEY_ALT)
-		if not alt:
+		if not Input.is_key_pressed(Keymap.CAMERA_MODIFIER):
 			_mode = Mode.NONE
 			return
 
@@ -63,8 +60,7 @@ func _input(event: InputEvent) -> void:
 				_apply_transform()
 				get_viewport().set_input_as_handled()
 
-		# Alt + RMB drag = dolly zoom
-		if Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+		if Input.is_mouse_button_pressed(Keymap.CAMERA_DOLLY_BTN):
 			var delta: float = event.relative.x - event.relative.y
 			_distance = clampf(_distance - delta * zoom_speed * 0.01 * _distance,
 								min_distance, max_distance)

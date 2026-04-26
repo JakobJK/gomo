@@ -1,16 +1,20 @@
 [gd_scene format=3 uid="uid://main"]
 
-[ext_resource type="Script" uid="uid://sxbmhrl15hil" path="res://main.gd" id="1"]
-[ext_resource type="Script" uid="uid://cdm4dwja20m0j" path="res://scripts/camera_controller.gd" id="2_0xm2m"]
+[ext_resource type="PackedScene" path="res://world.tscn" id="1"]
 
-[sub_resource type="Environment" id="Environment_0xm2m"]
+[node name="App" type="Node" unique_id=1331486087]
 
-[node name="Main" type="Node3D" unique_id=2048745500]
-script = ExtResource("1")
+[node name="UI" type="CanvasLayer" parent="." unique_id=1568183294]
 
-[node name="perspective" type="Camera3D" parent="." unique_id=289714256]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 4)
-script = ExtResource("2_0xm2m")
+[node name="SubViewportContainer" type="SubViewportContainer" parent="UI" unique_id=1690328211]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+stretch = true
 
-[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1957067904]
-environment = SubResource("Environment_0xm2m")
+[node name="SubViewport" type="SubViewport" parent="UI/SubViewportContainer" unique_id=696180281]
+handle_input_locally = false
+size = Vector2i(1152, 648)
+render_target_update_mode = 4
+
+[node name="World" parent="UI/SubViewportContainer/SubViewport" unique_id=1107646870 instance=ExtResource("1")]

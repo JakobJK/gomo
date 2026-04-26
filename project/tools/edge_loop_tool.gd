@@ -43,6 +43,7 @@ func handle_input(event: InputEvent, _hem: HalfEdgeMesh, _camera: Camera3D) -> b
 	return false
 
 func draw_preview(im: ImmediateMesh, hem: HalfEdgeMesh) -> void:
+	const _COL := Color(0.2, 1.0, 0.4)
 	im.surface_begin(Mesh.PRIMITIVE_LINES)
 	if _loop_edges.size() > 0:
 		for he in _loop_edges:
@@ -50,19 +51,30 @@ func draw_preview(im: ImmediateMesh, hem: HalfEdgeMesh) -> void:
 			var v1 := hem.get_half_edge_vertex(hem.get_half_edge_next(he))
 			var p0 := hem.get_vertex_position(v0)
 			var p1 := hem.get_vertex_position(v1)
-			im.surface_add_vertex(p0.lerp(p1, 0.5))
+			im.surface_set_color(_COL); im.surface_add_vertex(p0.lerp(p1, 0.5))
 			var he_next := hem.get_half_edge_next(he)
 			var he_opp  := hem.get_half_edge_next(he_next)
 			var vo0 := hem.get_half_edge_vertex(he_opp)
 			var vo1 := hem.get_half_edge_vertex(hem.get_half_edge_next(he_opp))
+			im.surface_set_color(_COL)
 			im.surface_add_vertex(
 				hem.get_vertex_position(vo0).lerp(hem.get_vertex_position(vo1), 0.5))
 	else:
+		im.surface_set_color(Color.TRANSPARENT)
 		im.surface_add_vertex(Vector3.ZERO)
+		im.surface_set_color(Color.TRANSPARENT)
 		im.surface_add_vertex(Vector3.ZERO)
 	im.surface_end()
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_end()
 
-func on_deactivate(_hem: HalfEdgeMesh) -> void:
+func on_deactivate() -> void:
 	_hovered_edge = -1
 	_loop_edges   = []
 

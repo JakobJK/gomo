@@ -36,8 +36,22 @@ func handle_input(event: InputEvent, hem: HalfEdgeMesh, camera: Camera3D) -> boo
 
 	return false
 
-func draw_preview(im: ImmediateMesh, hem: HalfEdgeMesh) -> void:
+func draw_preview(im: ImmediateMesh, _hem: HalfEdgeMesh) -> void:
 	if _hit_face == -1:
+		im.surface_begin(Mesh.PRIMITIVE_LINES)
+		im.surface_set_color(Color.TRANSPARENT)
+		im.surface_add_vertex(Vector3.ZERO)
+		im.surface_set_color(Color.TRANSPARENT)
+		im.surface_add_vertex(Vector3.ZERO)
+		im.surface_end()
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		im.surface_set_color(Color.TRANSPARENT)
+		im.surface_add_vertex(Vector3.ZERO)
+		im.surface_set_color(Color.TRANSPARENT)
+		im.surface_add_vertex(Vector3.ZERO)
+		im.surface_set_color(Color.TRANSPARENT)
+		im.surface_add_vertex(Vector3.ZERO)
+		im.surface_end()
 		return
 	im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP)
 
@@ -50,12 +64,22 @@ func draw_preview(im: ImmediateMesh, hem: HalfEdgeMesh) -> void:
 	var bitangent := _hit_normal.cross(tangent).normalized()
 
 	const STEPS := 32
+	const _COL := Color(0.2, 1.0, 0.4)
 	for i in STEPS + 1:
 		var angle := TAU * i / STEPS
+		im.surface_set_color(_COL)
 		im.surface_add_vertex(_hit_pos + (tangent * cos(angle) + bitangent * sin(angle)) * radius)
 	im.surface_end()
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_end()
 
-func on_deactivate(_hem: HalfEdgeMesh) -> void:
+func on_deactivate() -> void:
 	_hit_face    = -1
 	_is_painting = false
 

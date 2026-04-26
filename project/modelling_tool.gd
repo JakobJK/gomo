@@ -17,12 +17,22 @@ func handle_input(event: InputEvent, _hem: HalfEdgeMesh, _camera: Camera3D) -> b
 
 func draw_preview(im: ImmediateMesh, _hem: HalfEdgeMesh) -> void:
 	im.surface_begin(Mesh.PRIMITIVE_LINES)
+	im.surface_set_color(Color.TRANSPARENT)
 	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_end()
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
 	im.surface_add_vertex(Vector3.ZERO)
 	im.surface_end()
 
-func on_activate(_hem: HalfEdgeMesh) -> void:
+func on_activate() -> void:
 	pass
 
-func on_deactivate(_hem: HalfEdgeMesh) -> void:
+func on_deactivate() -> void:
 	pass

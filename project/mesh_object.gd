@@ -12,24 +12,15 @@ var camera: Camera3D     = null
 var _mesh_instance: MeshInstance3D
 var _overlay:       MeshInstance3D
 
-# --- Selection ---
-var selected_vertices: PackedInt32Array = []
-var selected_edges:    PackedInt32Array = []
-var selected_faces:    PackedInt32Array = []
-
 var hovered_vertex: int = -1
 var hovered_edge:   int = -1
 var hovered_face:   int = -1
-
-var is_selected: bool          = false
-var active_tool: ModellingTool = null
 
 const PICK_VERTEX_PX := 20.0
 const PICK_EDGE_PX   := 12.0
 
 # --- Materials ---
-var _shader_face:      Shader
-var _mat_face:         ShaderMaterial
+var _mat_mesh:         StandardMaterial3D
 var _mat_wire_dim:     StandardMaterial3D
 var _mat_wire_bright:  StandardMaterial3D
 var _mat_wire_sel:     StandardMaterial3D
@@ -37,44 +28,27 @@ var _mat_wire_hover:   StandardMaterial3D
 var _mat_wire_object:  StandardMaterial3D
 var _mat_tool_preview: StandardMaterial3D
 
-var _face_textures:  Array[ImageTexture]   = []
-var _face_materials: Array[ShaderMaterial] = []
-var _debug_normals:  bool                  = false
-
 func _ready() -> void:
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
 	_overlay = MeshInstance3D.new()
 	add_child(_overlay)
 
-	_shader_face = Shader.new()
-	_shader_face.code = """
-shader_type spatial;
-render_mode diffuse_lambert;
-uniform sampler2D local_nmap : hint_default_white, filter_linear;
-uniform bool debug_normals = false;
-void fragment() {
-	vec3 local_n = normalize(texture(local_nmap, UV).rgb * 2.0 - 1.0);
-	if (debug_normals) {
-		ALBEDO   = vec3(0.0);
-		EMISSION = local_n * 0.5 + 0.5;
-	} else {
-		ALBEDO    = vec3(0.78, 0.47, 0.18);
-		ROUGHNESS = 0.35;
-		SPECULAR  = 0.65;
-		NORMAL    = normalize((VIEW_MATRIX * MODEL_MATRIX * vec4(local_n, 0.0)).xyz);
-	}
-}
-"""
-	_mat_face = ShaderMaterial.new()
-	_mat_face.shader = _shader_face
+	_mat_mesh = StandardMaterial3D.new()
+	_mat_mesh.albedo_color     = Color(0.78, 0.47, 0.18)
+	_mat_mesh.roughness        = 0.35
+	_mat_mesh.metallic_specular = 0.65
 
 	_mat_wire_dim     = _make_wire(Color(0.25, 0.25, 0.25))
 	_mat_wire_bright  = _make_wire(Color(0.8,  0.8,  0.8))
 	_mat_wire_sel     = _make_wire(Color(1.0,  0.55, 0.1))
 	_mat_wire_hover   = _make_wire(Color(1.0,  0.9,  0.2))
 	_mat_wire_object  = _make_wire(Color(1.0,  1.0,  1.0))
-	_mat_tool_preview = _make_wire(Color(0.2,  1.0,  0.4))
+	_mat_tool_preview = StandardMaterial3D.new()
+	_mat_tool_preview.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_mat_tool_preview.vertex_color_use_as_albedo = true
+	_mat_tool_preview.no_depth_test = true
+	_mat_tool_preview.cull_mode = BaseMaterial3D.CULL_DISABLED
 
 func _make_wire(color: Color) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
@@ -83,11 +57,17 @@ func _make_wire(color: Color) -> StandardMaterial3D:
 	return mat
 
 func _process(_delta: float) -> void:
-	if mode == Mode.OBJECT or camera == null:
+	if camera == null:
 		return
-	if active_tool != null:
+	if mode == Mode.OBJECT:
+		if GlobalState.active_tool != null and GlobalState.has(self):
+			_sync_tool_state()
+			GlobalState.active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
+			_draw_overlay()
+		return
+	if GlobalState.active_tool != null:
 		_sync_tool_state()
-		active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
+		GlobalState.active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
 	else:
 		_update_hover(get_viewport().get_mouse_position())
 	_draw_overlay()
@@ -107,26 +87,20 @@ func set_mode(new_mode: Mode) -> void:
 		return
 	mode = new_mode
 	_clear_selection()
+	if mode == Mode.OBJECT:
+		GlobalState.set_context(null)
+	else:
+		GlobalState.set_context(self)
 	set_tool(null)
 	refresh()
 
 func set_tool(tool: ModellingTool) -> void:
-	if active_tool != null:
-		active_tool.on_deactivate(hem)
-	active_tool = tool
-	if active_tool != null:
-		active_tool.on_activate(hem)
+	GlobalState.set_tool(tool)
+	if GlobalState.active_tool != null:
 		_sync_tool_state()
 	_draw_overlay()
 
-func toggle_debug_normals() -> void:
-	_debug_normals = !_debug_normals
-	for mat in _face_materials:
-		if mat != null:
-			mat.set_shader_parameter("debug_normals", _debug_normals)
-
-func set_selected(value: bool) -> void:
-	is_selected = value
+func redraw() -> void:
 	_draw_overlay()
 
 func ray_hits(ray_from: Vector3, ray_dir: Vector3) -> bool:
@@ -137,52 +111,51 @@ func ray_hits(ray_from: Vector3, ray_dir: Vector3) -> bool:
 # Called by main. Returns true if event was consumed.
 func handle_input(event: InputEvent) -> bool:
 	# Undo/redo always first
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.ctrl_pressed and event.keycode == KEY_Z:
-			var changed := hem.redo() if event.shift_pressed else hem.undo()
-			if changed:
-				_clear_selection()
-				refresh()
-			return true
+	if event.is_action_pressed("redo"):
+		var changed := hem.redo()
+		if changed: _clear_selection(); refresh()
+		return true
+	if event.is_action_pressed("undo"):
+		var changed := hem.undo()
+		if changed: _clear_selection(); refresh()
+		return true
 
 	if mode == Mode.OBJECT:
+		if not GlobalState.has(self): return false
+		if GlobalState.active_tool != null:
+			_sync_tool_state()
+			if GlobalState.active_tool.handle_input(event, hem, camera):
+				refresh()
+				return true
 		return false
 
 	# Tool switching
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_Q:
-			set_tool(null)
-			return true
-		if event.keycode == KEY_W:
-			if active_tool is _MoveTool: set_tool(null)
-			else: set_tool(_MoveTool.new())
-			return true
-		if event.keycode == KEY_S and mode == Mode.FACE:
-			if active_tool is SculptTool: set_tool(null)
-			else: set_tool(SculptTool.new())
-			return true
-		if event.keycode == KEY_F and mode == Mode.FACE:
-			if active_tool is FlattenTool: set_tool(null)
-			else: set_tool(FlattenTool.new())
-			return true
-		if event.keycode == KEY_R and event.ctrl_pressed and mode == Mode.EDGE:
-			if active_tool is EdgeLoopTool: set_tool(null)
-			else: set_tool(EdgeLoopTool.new())
-			return true
+	if event.is_action_pressed("tool_none"):
+		set_tool(null)
+		return true
+	if event.is_action_pressed("tool_move"):
+		set_tool(null if GlobalState.active_tool is _MoveTool else _MoveTool.new())
+		return true
+	if event.is_action_pressed("tool_sculpt") and mode == Mode.FACE:
+		set_tool(null if GlobalState.active_tool is SculptTool else SculptTool.new())
+		return true
+	if event.is_action_pressed("tool_flatten") and mode == Mode.FACE:
+		set_tool(null if GlobalState.active_tool is FlattenTool else FlattenTool.new())
+		return true
+	if event.is_action_pressed("tool_edge_loop") and mode == Mode.EDGE:
+		set_tool(null if GlobalState.active_tool is EdgeLoopTool else EdgeLoopTool.new())
+		return true
 
 	# Delegate to active tool
-	if active_tool != null:
+	if GlobalState.active_tool != null:
 		_sync_tool_state()
-		if active_tool.handle_input(event, hem, camera):
+		if GlobalState.active_tool.handle_input(event, hem, camera):
 			refresh()
 			return true
 
 	# Operations
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_E:
-			return _do_extrude()
-		if event.keycode == KEY_X:
-			return _do_delete()
+	if event.is_action_pressed("op_extrude"): return _do_extrude()
+	if event.is_action_pressed("op_delete"):  return _do_delete()
 
 	# Selection
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -196,26 +169,28 @@ func handle_input(event: InputEvent) -> bool:
 func _do_extrude() -> bool:
 	match mode:
 		Mode.EDGE:
-			if selected_edges.is_empty(): return false
-			var he := selected_edges[0]
+			if GlobalState.edges.is_empty(): return false
+			var he := GlobalState.edges[0]
 			if hem.get_half_edge_twin(he) != -1: return false
 			hem.extrude_edge(he)
-			selected_edges = PackedInt32Array()
+			GlobalState.clear_components()
 			refresh()
 			return true
 		Mode.FACE:
-			if selected_faces.is_empty(): return false
-			hem.extrude_face(selected_faces[0])
-			selected_faces = PackedInt32Array()
+			if GlobalState.faces.is_empty(): return false
+			hem.extrude_face(GlobalState.faces[0])
+			GlobalState.clear_components()
+			_sync_tool_state()
 			refresh()
 			return true
 	return false
 
 func _do_delete() -> bool:
-	if mode == Mode.FACE and not selected_faces.is_empty():
-		for fi in selected_faces:
+	if mode == Mode.FACE and not GlobalState.faces.is_empty():
+		for fi in GlobalState.faces:
 			hem.delete_face(fi)
-		selected_faces = PackedInt32Array()
+		GlobalState.clear_components()
+		_sync_tool_state()
 		refresh()
 		return true
 	return false
@@ -228,29 +203,25 @@ func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
 			var picked := _pick_vertex(mouse_pos)
 			if picked != -1:
 				if additive:
-					if picked in selected_vertices:
-						selected_vertices = _arr_remove(selected_vertices, picked)
-					else:
-						selected_vertices.push_back(picked)
+					GlobalState.toggle_vertex(picked)
 				else:
-					selected_vertices = PackedInt32Array([picked])
+					GlobalState.clear_components()
+					GlobalState.add_vertex(picked)
 			elif not additive:
-				selected_vertices = PackedInt32Array()
+				GlobalState.clear_components()
 
 		Mode.EDGE:
 			var picked := _pick_edge(mouse_pos)
 			if picked != -1:
-				var twin      := hem.get_half_edge_twin(picked)
-				var canonical := mini(picked, twin) if twin != -1 else picked
+				var twin:      int = hem.get_half_edge_twin(picked)
+				var canonical: int = mini(picked, twin) if twin != -1 else picked
 				if additive:
-					if canonical in selected_edges:
-						selected_edges = _arr_remove(selected_edges, canonical)
-					else:
-						selected_edges.push_back(canonical)
+					GlobalState.toggle_edge(canonical)
 				else:
-					selected_edges = PackedInt32Array([canonical])
+					GlobalState.clear_components()
+					GlobalState.add_edge(canonical)
 			elif not additive:
-				selected_edges = PackedInt32Array()
+				GlobalState.clear_components()
 
 		Mode.FACE:
 			var ray_from := camera.project_ray_origin(mouse_pos)
@@ -260,26 +231,24 @@ func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
 			var picked := hem.pick_face(lf, ld)
 			if picked != -1:
 				if additive:
-					if picked in selected_faces:
-						selected_faces = _arr_remove(selected_faces, picked)
-					else:
-						selected_faces.push_back(picked)
+					GlobalState.toggle_face(picked)
 				else:
-					selected_faces = PackedInt32Array([picked])
+					GlobalState.clear_components()
+					GlobalState.add_face(picked)
 			elif not additive:
-				selected_faces = PackedInt32Array()
+				GlobalState.clear_components()
 
-	if active_tool != null:
+	if GlobalState.active_tool != null:
 		_sync_tool_state()
 	_draw_overlay()
 
 func _sync_tool_state() -> void:
-	if active_tool == null: return
-	active_tool.object_transform  = global_transform
-	active_tool.current_mode      = mode
-	active_tool.selected_vertices = selected_vertices
-	active_tool.selected_edges    = selected_edges
-	active_tool.selected_faces    = selected_faces
+	if GlobalState.active_tool == null: return
+	GlobalState.active_tool.object_transform  = global_transform
+	GlobalState.active_tool.current_mode      = mode
+	GlobalState.active_tool.selected_vertices = GlobalState.vertices
+	GlobalState.active_tool.selected_edges    = GlobalState.edges
+	GlobalState.active_tool.selected_faces    = GlobalState.faces
 
 func _update_hover(mouse_pos: Vector2) -> void:
 	match mode:
@@ -295,46 +264,17 @@ func _update_hover(mouse_pos: Vector2) -> void:
 			hovered_face = hem.pick_face(lf, ld)
 
 func _clear_selection() -> void:
-	selected_vertices = PackedInt32Array()
-	selected_edges    = PackedInt32Array()
-	selected_faces    = PackedInt32Array()
+	GlobalState.clear_components()
 	hovered_vertex = -1
 	hovered_edge   = -1
 	hovered_face   = -1
 
-func _arr_remove(arr: PackedInt32Array, val: int) -> PackedInt32Array:
-	var out := PackedInt32Array()
-	for v in arr:
-		if v != val: out.push_back(v)
-	return out
-
 # --- Rendering ---
 
 func refresh() -> void:
-	var face_count := hem.get_face_count()
-	_face_textures.resize(face_count)
-	_face_materials.resize(face_count)
-
 	var array_mesh := hem.to_array_mesh()
-
-	var surface_idx := 0
-	for fi in face_count:
-		if not hem.is_face_valid(fi):
-			continue
-		var img: Image = hem.get_face_normal_map(fi)
-		if _face_textures[fi] == null:
-			_face_textures[fi] = ImageTexture.create_from_image(img)
-		else:
-			_face_textures[fi].update(img)
-
-		if _face_materials[fi] == null:
-			_face_materials[fi] = _mat_face.duplicate()
-		var mat: ShaderMaterial = _face_materials[fi]
-		mat.set_shader_parameter("local_nmap",    _face_textures[fi])
-		mat.set_shader_parameter("debug_normals", _debug_normals)
-		array_mesh.surface_set_material(surface_idx, mat)
-		surface_idx += 1
-
+	for i in array_mesh.get_surface_count():
+		array_mesh.surface_set_material(i, _mat_mesh)
 	_mesh_instance.mesh = array_mesh
 	_draw_overlay()
 
@@ -343,7 +283,7 @@ func _draw_overlay() -> void:
 
 	match mode:
 		Mode.OBJECT:
-			if is_selected:
+			if GlobalState.has(self):
 				im.surface_begin(Mesh.PRIMITIVE_LINES)
 				for i in hem.get_edge_count():
 					var twin: int = hem.get_half_edge_twin(i)
@@ -351,8 +291,11 @@ func _draw_overlay() -> void:
 					im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(i)))
 					im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(i))))
 				im.surface_end()
+				_ov_tool_preview(im)
 				_overlay.mesh = im
 				_overlay.set_surface_override_material(0, _mat_wire_object)
+				_overlay.set_surface_override_material(1, _mat_tool_preview)
+				_overlay.set_surface_override_material(2, _mat_tool_preview)
 			else:
 				_overlay.mesh = null
 
@@ -365,16 +308,20 @@ func _draw_overlay() -> void:
 			_ov_vertex_dots(im, true)
 			# surf 3: hovered vertex dot
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
-			if hovered_vertex != -1 and hovered_vertex not in selected_vertices:
+			if hovered_vertex != -1 and hovered_vertex not in GlobalState.vertices:
 				_draw_dot(im, hem.get_vertex_position(hovered_vertex))
 			else:
 				_dummy(im)
 			im.surface_end()
+			# surf 4-5: tool preview (lines + triangles)
+			_ov_tool_preview(im)
 			_overlay.mesh = im
 			_overlay.set_surface_override_material(0, _mat_wire_dim)
 			_overlay.set_surface_override_material(1, _mat_wire_bright)
 			_overlay.set_surface_override_material(2, _mat_wire_sel)
 			_overlay.set_surface_override_material(3, _mat_wire_hover)
+			_overlay.set_surface_override_material(4, _mat_tool_preview)
+			_overlay.set_surface_override_material(5, _mat_tool_preview)
 
 		Mode.EDGE:
 			# surf 0: unselected non-hovered edges
@@ -385,7 +332,7 @@ func _draw_overlay() -> void:
 				if twin == -1 and hem.get_half_edge_face(i) == -1: continue
 				if twin != -1 and i > twin: continue
 				var canonical := mini(i, twin) if twin != -1 else i
-				if canonical in selected_edges: continue
+				if canonical in GlobalState.edges: continue
 				if i == hovered_edge or twin == hovered_edge: continue
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(i)))
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(i))))
@@ -395,7 +342,7 @@ func _draw_overlay() -> void:
 			# surf 1: selected edges
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
 			drew = false
-			for he in selected_edges:
+			for he in GlobalState.edges:
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(he)))
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(he))))
 				drew = true
@@ -403,19 +350,20 @@ func _draw_overlay() -> void:
 			im.surface_end()
 			# surf 2: hovered edge
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
-			if hovered_edge != -1 and hovered_edge not in selected_edges:
+			if hovered_edge != -1 and hovered_edge not in GlobalState.edges:
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hovered_edge)))
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(hovered_edge))))
 			else:
 				_dummy(im)
 			im.surface_end()
-			# surf 3: tool preview
+			# surf 3-4: tool preview (lines + triangles)
 			_ov_tool_preview(im)
 			_overlay.mesh = im
 			_overlay.set_surface_override_material(0, _mat_wire_dim)
 			_overlay.set_surface_override_material(1, _mat_wire_sel)
 			_overlay.set_surface_override_material(2, _mat_wire_hover)
 			_overlay.set_surface_override_material(3, _mat_tool_preview)
+			_overlay.set_surface_override_material(4, _mat_tool_preview)
 
 		Mode.FACE:
 			# surf 0: all edges dim
@@ -423,7 +371,7 @@ func _draw_overlay() -> void:
 			# surf 1: selected face outlines
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
 			var drew := false
-			for fi in selected_faces:
+			for fi in GlobalState.faces:
 				if not hem.is_face_valid(fi): continue
 				var fv := hem.get_face_vertex_indices(fi)
 				for i in fv.size():
@@ -436,13 +384,14 @@ func _draw_overlay() -> void:
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
 			_dummy(im)
 			im.surface_end()
-			# surf 3: tool preview
+			# surf 3-4: tool preview (lines + triangles)
 			_ov_tool_preview(im)
 			_overlay.mesh = im
 			_overlay.set_surface_override_material(0, _mat_wire_dim)
 			_overlay.set_surface_override_material(1, _mat_wire_sel)
 			_overlay.set_surface_override_material(2, null)
 			_overlay.set_surface_override_material(3, _mat_tool_preview)
+			_overlay.set_surface_override_material(4, _mat_tool_preview)
 
 func _ov_all_edges(im: ImmediateMesh) -> void:
 	im.surface_begin(Mesh.PRIMITIVE_LINES)
@@ -461,7 +410,7 @@ func _ov_vertex_dots(im: ImmediateMesh, only_selected: bool) -> void:
 	im.surface_begin(Mesh.PRIMITIVE_LINES)
 	var drew := false
 	for i in hem.get_vertex_count():
-		var is_sel := i in selected_vertices
+		var is_sel := i in GlobalState.vertices
 		if is_sel != only_selected: continue
 		_draw_dot(im, hem.get_vertex_position(i))
 		drew = true
@@ -480,15 +429,28 @@ func _draw_dot(im: ImmediateMesh, pos: Vector3) -> void:
 	im.surface_add_vertex(pos - right); im.surface_add_vertex(pos + up)
 
 func _ov_tool_preview(im: ImmediateMesh) -> void:
-	if active_tool != null:
-		active_tool.draw_preview(im, hem)
+	if GlobalState.active_tool != null:
+		GlobalState.active_tool.draw_preview(im, hem)
 	else:
 		im.surface_begin(Mesh.PRIMITIVE_LINES)
 		_dummy(im)
 		im.surface_end()
+		im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+		_dummy_tri(im)
+		im.surface_end()
 
 func _dummy(im: ImmediateMesh) -> void:
+	im.surface_set_color(Color.TRANSPARENT)
 	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+
+func _dummy_tri(im: ImmediateMesh) -> void:
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
+	im.surface_add_vertex(Vector3.ZERO)
+	im.surface_set_color(Color.TRANSPARENT)
 	im.surface_add_vertex(Vector3.ZERO)
 
 # --- Picking ---

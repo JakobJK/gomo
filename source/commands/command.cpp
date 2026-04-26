@@ -42,4 +42,4 @@ void CommandHistory::clear() {
     _redo_stack.clear();
 }
 
-} // namespace gomo
+}
