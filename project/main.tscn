@@ -1,20 +1,29 @@
 [gd_scene format=3 uid="uid://main"]
 
-[ext_resource type="PackedScene" path="res://world.tscn" id="1"]
+[ext_resource type="Script" uid="uid://d33kpkclb10de" path="res://app.gd" id="1"]
+[ext_resource type="PackedScene" path="res://world.tscn" id="2"]
+[ext_resource type="PackedScene" path="res://ui/view_panel.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://ui/scene_graph.tscn" id="4"]
+[ext_resource type="PackedScene" uid="uid://properties_panel" path="res://ui/properties_panel.tscn" id="5"]
 
-[node name="App" type="Node" unique_id=1331486087]
+[node name="App" type="Node" unique_id=2054643101]
+script = ExtResource("1")
 
-[node name="UI" type="CanvasLayer" parent="." unique_id=1568183294]
+[node name="World" parent="." unique_id=717444071 instance=ExtResource("2")]
 
-[node name="SubViewportContainer" type="SubViewportContainer" parent="UI" unique_id=1690328211]
-anchors_preset = 15
-anchor_right = 1.0
+[node name="UI" type="CanvasLayer" parent="." unique_id=1495129824]
+
+[node name="ViewPanel" parent="UI" unique_id=1376754363 instance=ExtResource("3")]
+
+[node name="SceneGraph" parent="UI" unique_id=1345285628 instance=ExtResource("4")]
+anchors_preset = 9
+
+[node name="PropertiesPanel" parent="UI" instance=ExtResource("5")]
+anchor_left   = 1.0
+anchor_top    = 0.0
+anchor_right  = 1.0
 anchor_bottom = 1.0
-stretch = true
-
-[node name="SubViewport" type="SubViewport" parent="UI/SubViewportContainer" unique_id=696180281]
-handle_input_locally = false
-size = Vector2i(1152, 648)
-render_target_update_mode = 4
-
-[node name="World" parent="UI/SubViewportContainer/SubViewport" unique_id=1107646870 instance=ExtResource("1")]
+offset_left   = -220.0
+offset_top    = 0.0
+offset_right  = 0.0
+offset_bottom = 0.0

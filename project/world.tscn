@@ -10,7 +10,11 @@ script = ExtResource("1")
 
 [node name="perspective" type="Camera3D" parent="."]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 4)
+current = false
 script = ExtResource("2")
+
+[node name="RemoteTransform3D" type="RemoteTransform3D" parent="perspective"]
+use_global_coordinates = true
 
 [node name="WorldEnvironment" type="WorldEnvironment" parent="."]
 environment = SubResource("Environment_1")

@@ -2,10 +2,15 @@ extends Node3D
 
 const _MoveTool = preload("res://tools/move_tool.gd")
 
-@onready var camera: Camera3D = $perspective
+var camera: Camera3D:
+	set(v):
+		camera = v
+		for obj in mesh_objects:
+			obj.camera = v
 
-var mesh_objects:   Array[MeshObject] = []
-var focused_object: MeshObject        = null
+
+var mesh_objects:   Array[GomoMesh] = []
+var focused_object: GomoMesh        = null
 
 func _ready() -> void:
 	Keymap.setup()
@@ -43,26 +48,27 @@ func _ready() -> void:
 	world_env.environment = env
 	add_child(world_env)
 
+func setup() -> void:
 	var obj := _spawn_mesh_object()
 	obj.build_box()
 
-func _spawn_mesh_object() -> MeshObject:
-	var obj := MeshObject.new()
+func _spawn_mesh_object() -> GomoMesh:
+	var obj := GomoMesh.new()
 	obj.camera = camera
 	add_child(obj)
 	mesh_objects.append(obj)
 	return obj
 
-func _input(event: InputEvent) -> void:
+func _unhandled_input(event: InputEvent) -> void:
 	# Object-mode tool shortcuts — scene-wide, not per-object
-	if focused_object != null and focused_object.mode == MeshObject.Mode.OBJECT:
+	if focused_object != null and focused_object.mode == GomoMesh.Mode.OBJECT:
 		if event.is_action_pressed("tool_move"):
-			GlobalState.set_tool(null if GlobalState.active_tool is _MoveTool else _MoveTool.new())
+			SelectionState.set_tool(null if SelectionState.active_tool is _MoveTool else _MoveTool.new())
 			focused_object.redraw()
 			get_viewport().set_input_as_handled()
 			return
 		if event.is_action_pressed("tool_none"):
-			GlobalState.set_tool(null)
+			SelectionState.set_tool(null)
 			focused_object.redraw()
 			get_viewport().set_input_as_handled()
 			return
@@ -70,48 +76,52 @@ func _input(event: InputEvent) -> void:
 	# Mode switching
 	if focused_object != null:
 		var mode_key := -1
-		if   event.is_action_pressed("mode_object"): mode_key = MeshObject.Mode.OBJECT
-		elif event.is_action_pressed("mode_vertex"): mode_key = MeshObject.Mode.VERTEX
-		elif event.is_action_pressed("mode_edge"):   mode_key = MeshObject.Mode.EDGE
-		elif event.is_action_pressed("mode_face"):   mode_key = MeshObject.Mode.FACE
+		if   event.is_action_pressed("mode_object"): mode_key = GomoMesh.Mode.OBJECT
+		elif event.is_action_pressed("mode_vertex"): mode_key = GomoMesh.Mode.VERTEX
+		elif event.is_action_pressed("mode_edge"):   mode_key = GomoMesh.Mode.EDGE
+		elif event.is_action_pressed("mode_face"):   mode_key = GomoMesh.Mode.FACE
 		if mode_key != -1:
-			focused_object.set_mode(mode_key as MeshObject.Mode)
+			focused_object.set_mode(mode_key as GomoMesh.Mode)
 			get_viewport().set_input_as_handled()
 			return
 
 	# Non-object mode objects get first pass at all events
 	for obj in mesh_objects:
-		if obj.mode != MeshObject.Mode.OBJECT:
+		if obj.mode != GomoMesh.Mode.OBJECT:
 			if obj.handle_input(event):
 				get_viewport().set_input_as_handled()
 				return
 
 	# Focused object in object mode gets input for tool activation and gizmo use
-	if focused_object != null and focused_object.mode == MeshObject.Mode.OBJECT:
+	if focused_object != null and focused_object.mode == GomoMesh.Mode.OBJECT:
 		if focused_object.handle_input(event):
 			get_viewport().set_input_as_handled()
 			return
 
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
+			and not Input.is_key_pressed(Keymap.CAMERA_MODIFIER):
 		var ray_from := camera.project_ray_origin(event.position)
 		var ray_dir  := camera.project_ray_normal(event.position)
 
 		for obj in mesh_objects:
-			if obj.mode == MeshObject.Mode.OBJECT and obj.ray_hits(ray_from, ray_dir):
-				_focus(obj)
+			if obj.mode == GomoMesh.Mode.OBJECT and obj.ray_hits(ray_from, ray_dir):
+				set_selection([obj])
 				get_viewport().set_input_as_handled()
 				return
 
 		# Clicked empty space — deselect
-		if focused_object != null and focused_object.mode == MeshObject.Mode.OBJECT:
-			GlobalState.remove(focused_object)
-			focused_object.redraw()
-			focused_object = null
+		if focused_object != null and focused_object.mode == GomoMesh.Mode.OBJECT:
+			set_selection([])
 
-func _focus(obj: MeshObject) -> void:
-	if focused_object != null and focused_object != obj:
-		GlobalState.remove(focused_object)
-		focused_object.redraw()
-	focused_object = obj
-	GlobalState.add(obj)
-	obj.redraw()
+func set_selection(nodes: Array[Node]) -> void:
+	for obj in mesh_objects:
+		if SelectionState.has(obj):
+			SelectionState.remove(obj)
+			obj.redraw()
+	focused_object = null
+	for node in nodes:
+		if node is GomoMesh:
+			SelectionState.add(node)
+			node.redraw()
+			focused_object = node
+	EventBus.instance.selection_changed.emit(nodes)

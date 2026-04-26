@@ -52,7 +52,7 @@ func handle_input(event: InputEvent, hem: HalfEdgeMesh, camera: Camera3D) -> boo
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			if _hovered_part == _NONE:
-				return false  # fall through to MeshObject selection
+				return false  # fall through to GomoMesh selection
 			var verts := _moveable_vertices(hem)
 			if verts.is_empty():
 				return false

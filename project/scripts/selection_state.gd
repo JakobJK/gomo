@@ -1,8 +1,7 @@
-class_name GlobalState
+class_name SelectionState
 extends RefCounted
 
 # --- Active Tool ---
-
 static var active_tool: ModellingTool = null
 
 static func set_tool(tool: ModellingTool) -> void:
@@ -13,23 +12,22 @@ static func set_tool(tool: ModellingTool) -> void:
 		active_tool.on_activate()
 
 # --- Selection ---
-
-static var objects:  Array[MeshObject] = []
-static var context:  MeshObject        = null
+static var objects:  Array[GomoMesh] = []
+static var context:  GomoMesh        = null
 static var vertices: PackedInt32Array  = []
 static var edges:    PackedInt32Array  = []
 static var faces:    PackedInt32Array  = []
 
-static func add(obj: MeshObject) -> void:
+static func add(obj: GomoMesh) -> void:
 	if obj not in objects: objects.append(obj)
 
-static func remove(obj: MeshObject) -> void:
+static func remove(obj: GomoMesh) -> void:
 	objects.erase(obj)
 
-static func has(obj: MeshObject) -> bool:
+static func has(obj: GomoMesh) -> bool:
 	return obj in objects
 
-static func set_context(obj: MeshObject) -> void:
+static func set_context(obj: GomoMesh) -> void:
 	if context != obj:
 		clear_components()
 		context = obj
@@ -60,14 +58,17 @@ static func toggle_edge(i: int) -> void:
 	else:          add_edge(i)
 
 static func add_face(i: int) -> void:
-	if i not in faces: faces.push_back(i)
+	if i not in faces: 
+		faces.push_back(i)
 
 static func remove_face(i: int) -> void:
 	faces = _filter(faces, i)
 
 static func toggle_face(i: int) -> void:
-	if i in faces: remove_face(i)
-	else:          add_face(i)
+	if i in faces:
+		remove_face(i)
+	else:
+		add_face(i)
 
 static func _filter(arr: PackedInt32Array, val: int) -> PackedInt32Array:
 	var out := PackedInt32Array()

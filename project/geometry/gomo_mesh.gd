@@ -1,5 +1,5 @@
 extends Node3D
-class_name MeshObject
+class_name GomoMesh
 
 const _MoveTool = preload("res://tools/move_tool.gd")
 
@@ -60,14 +60,14 @@ func _process(_delta: float) -> void:
 	if camera == null:
 		return
 	if mode == Mode.OBJECT:
-		if GlobalState.active_tool != null and GlobalState.has(self):
+		if SelectionState.active_tool != null and SelectionState.has(self):
 			_sync_tool_state()
-			GlobalState.active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
+			SelectionState.active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
 			_draw_overlay()
 		return
-	if GlobalState.active_tool != null:
+	if SelectionState.active_tool != null:
 		_sync_tool_state()
-		GlobalState.active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
+		SelectionState.active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
 	else:
 		_update_hover(get_viewport().get_mouse_position())
 	_draw_overlay()
@@ -88,15 +88,15 @@ func set_mode(new_mode: Mode) -> void:
 	mode = new_mode
 	_clear_selection()
 	if mode == Mode.OBJECT:
-		GlobalState.set_context(null)
+		SelectionState.set_context(null)
 	else:
-		GlobalState.set_context(self)
+		SelectionState.set_context(self)
 	set_tool(null)
 	refresh()
 
 func set_tool(tool: ModellingTool) -> void:
-	GlobalState.set_tool(tool)
-	if GlobalState.active_tool != null:
+	SelectionState.set_tool(tool)
+	if SelectionState.active_tool != null:
 		_sync_tool_state()
 	_draw_overlay()
 
@@ -121,10 +121,10 @@ func handle_input(event: InputEvent) -> bool:
 		return true
 
 	if mode == Mode.OBJECT:
-		if not GlobalState.has(self): return false
-		if GlobalState.active_tool != null:
+		if not SelectionState.has(self): return false
+		if SelectionState.active_tool != null:
 			_sync_tool_state()
-			if GlobalState.active_tool.handle_input(event, hem, camera):
+			if SelectionState.active_tool.handle_input(event, hem, camera):
 				refresh()
 				return true
 		return false
@@ -134,22 +134,22 @@ func handle_input(event: InputEvent) -> bool:
 		set_tool(null)
 		return true
 	if event.is_action_pressed("tool_move"):
-		set_tool(null if GlobalState.active_tool is _MoveTool else _MoveTool.new())
+		set_tool(null if SelectionState.active_tool is _MoveTool else _MoveTool.new())
 		return true
 	if event.is_action_pressed("tool_sculpt") and mode == Mode.FACE:
-		set_tool(null if GlobalState.active_tool is SculptTool else SculptTool.new())
+		set_tool(null if SelectionState.active_tool is SculptTool else SculptTool.new())
 		return true
 	if event.is_action_pressed("tool_flatten") and mode == Mode.FACE:
-		set_tool(null if GlobalState.active_tool is FlattenTool else FlattenTool.new())
+		set_tool(null if SelectionState.active_tool is FlattenTool else FlattenTool.new())
 		return true
 	if event.is_action_pressed("tool_edge_loop") and mode == Mode.EDGE:
-		set_tool(null if GlobalState.active_tool is EdgeLoopTool else EdgeLoopTool.new())
+		set_tool(null if SelectionState.active_tool is EdgeLoopTool else EdgeLoopTool.new())
 		return true
 
 	# Delegate to active tool
-	if GlobalState.active_tool != null:
+	if SelectionState.active_tool != null:
 		_sync_tool_state()
-		if GlobalState.active_tool.handle_input(event, hem, camera):
+		if SelectionState.active_tool.handle_input(event, hem, camera):
 			refresh()
 			return true
 
@@ -159,6 +159,8 @@ func handle_input(event: InputEvent) -> bool:
 
 	# Selection
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		if Input.is_key_pressed(Keymap.CAMERA_MODIFIER):
+			return false
 		_handle_selection_click(event.position, event.shift_pressed)
 		return true
 
@@ -169,27 +171,27 @@ func handle_input(event: InputEvent) -> bool:
 func _do_extrude() -> bool:
 	match mode:
 		Mode.EDGE:
-			if GlobalState.edges.is_empty(): return false
-			var he := GlobalState.edges[0]
+			if SelectionState.edges.is_empty(): return false
+			var he := SelectionState.edges[0]
 			if hem.get_half_edge_twin(he) != -1: return false
 			hem.extrude_edge(he)
-			GlobalState.clear_components()
+			SelectionState.clear_components()
 			refresh()
 			return true
 		Mode.FACE:
-			if GlobalState.faces.is_empty(): return false
-			hem.extrude_face(GlobalState.faces[0])
-			GlobalState.clear_components()
+			if SelectionState.faces.is_empty(): return false
+			hem.extrude_face(SelectionState.faces[0])
+			SelectionState.clear_components()
 			_sync_tool_state()
 			refresh()
 			return true
 	return false
 
 func _do_delete() -> bool:
-	if mode == Mode.FACE and not GlobalState.faces.is_empty():
-		for fi in GlobalState.faces:
+	if mode == Mode.FACE and not SelectionState.faces.is_empty():
+		for fi in SelectionState.faces:
 			hem.delete_face(fi)
-		GlobalState.clear_components()
+		SelectionState.clear_components()
 		_sync_tool_state()
 		refresh()
 		return true
@@ -203,12 +205,12 @@ func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
 			var picked := _pick_vertex(mouse_pos)
 			if picked != -1:
 				if additive:
-					GlobalState.toggle_vertex(picked)
+					SelectionState.toggle_vertex(picked)
 				else:
-					GlobalState.clear_components()
-					GlobalState.add_vertex(picked)
+					SelectionState.clear_components()
+					SelectionState.add_vertex(picked)
 			elif not additive:
-				GlobalState.clear_components()
+				SelectionState.clear_components()
 
 		Mode.EDGE:
 			var picked := _pick_edge(mouse_pos)
@@ -216,12 +218,12 @@ func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
 				var twin:      int = hem.get_half_edge_twin(picked)
 				var canonical: int = mini(picked, twin) if twin != -1 else picked
 				if additive:
-					GlobalState.toggle_edge(canonical)
+					SelectionState.toggle_edge(canonical)
 				else:
-					GlobalState.clear_components()
-					GlobalState.add_edge(canonical)
+					SelectionState.clear_components()
+					SelectionState.add_edge(canonical)
 			elif not additive:
-				GlobalState.clear_components()
+				SelectionState.clear_components()
 
 		Mode.FACE:
 			var ray_from := camera.project_ray_origin(mouse_pos)
@@ -231,24 +233,24 @@ func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
 			var picked := hem.pick_face(lf, ld)
 			if picked != -1:
 				if additive:
-					GlobalState.toggle_face(picked)
+					SelectionState.toggle_face(picked)
 				else:
-					GlobalState.clear_components()
-					GlobalState.add_face(picked)
+					SelectionState.clear_components()
+					SelectionState.add_face(picked)
 			elif not additive:
-				GlobalState.clear_components()
+				SelectionState.clear_components()
 
-	if GlobalState.active_tool != null:
+	if SelectionState.active_tool != null:
 		_sync_tool_state()
 	_draw_overlay()
 
 func _sync_tool_state() -> void:
-	if GlobalState.active_tool == null: return
-	GlobalState.active_tool.object_transform  = global_transform
-	GlobalState.active_tool.current_mode      = mode
-	GlobalState.active_tool.selected_vertices = GlobalState.vertices
-	GlobalState.active_tool.selected_edges    = GlobalState.edges
-	GlobalState.active_tool.selected_faces    = GlobalState.faces
+	if SelectionState.active_tool == null: return
+	SelectionState.active_tool.object_transform  = global_transform
+	SelectionState.active_tool.current_mode      = mode
+	SelectionState.active_tool.selected_vertices = SelectionState.vertices
+	SelectionState.active_tool.selected_edges    = SelectionState.edges
+	SelectionState.active_tool.selected_faces    = SelectionState.faces
 
 func _update_hover(mouse_pos: Vector2) -> void:
 	match mode:
@@ -264,7 +266,7 @@ func _update_hover(mouse_pos: Vector2) -> void:
 			hovered_face = hem.pick_face(lf, ld)
 
 func _clear_selection() -> void:
-	GlobalState.clear_components()
+	SelectionState.clear_components()
 	hovered_vertex = -1
 	hovered_edge   = -1
 	hovered_face   = -1
@@ -277,13 +279,14 @@ func refresh() -> void:
 		array_mesh.surface_set_material(i, _mat_mesh)
 	_mesh_instance.mesh = array_mesh
 	_draw_overlay()
+	EventBus.instance.object_changed.emit(self)
 
 func _draw_overlay() -> void:
 	var im := ImmediateMesh.new()
 
 	match mode:
 		Mode.OBJECT:
-			if GlobalState.has(self):
+			if SelectionState.has(self):
 				im.surface_begin(Mesh.PRIMITIVE_LINES)
 				for i in hem.get_edge_count():
 					var twin: int = hem.get_half_edge_twin(i)
@@ -308,7 +311,7 @@ func _draw_overlay() -> void:
 			_ov_vertex_dots(im, true)
 			# surf 3: hovered vertex dot
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
-			if hovered_vertex != -1 and hovered_vertex not in GlobalState.vertices:
+			if hovered_vertex != -1 and hovered_vertex not in SelectionState.vertices:
 				_draw_dot(im, hem.get_vertex_position(hovered_vertex))
 			else:
 				_dummy(im)
@@ -332,7 +335,7 @@ func _draw_overlay() -> void:
 				if twin == -1 and hem.get_half_edge_face(i) == -1: continue
 				if twin != -1 and i > twin: continue
 				var canonical := mini(i, twin) if twin != -1 else i
-				if canonical in GlobalState.edges: continue
+				if canonical in SelectionState.edges: continue
 				if i == hovered_edge or twin == hovered_edge: continue
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(i)))
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(i))))
@@ -342,7 +345,7 @@ func _draw_overlay() -> void:
 			# surf 1: selected edges
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
 			drew = false
-			for he in GlobalState.edges:
+			for he in SelectionState.edges:
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(he)))
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(he))))
 				drew = true
@@ -350,7 +353,7 @@ func _draw_overlay() -> void:
 			im.surface_end()
 			# surf 2: hovered edge
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
-			if hovered_edge != -1 and hovered_edge not in GlobalState.edges:
+			if hovered_edge != -1 and hovered_edge not in SelectionState.edges:
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hovered_edge)))
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(hovered_edge))))
 			else:
@@ -371,7 +374,7 @@ func _draw_overlay() -> void:
 			# surf 1: selected face outlines
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
 			var drew := false
-			for fi in GlobalState.faces:
+			for fi in SelectionState.faces:
 				if not hem.is_face_valid(fi): continue
 				var fv := hem.get_face_vertex_indices(fi)
 				for i in fv.size():
@@ -410,7 +413,7 @@ func _ov_vertex_dots(im: ImmediateMesh, only_selected: bool) -> void:
 	im.surface_begin(Mesh.PRIMITIVE_LINES)
 	var drew := false
 	for i in hem.get_vertex_count():
-		var is_sel := i in GlobalState.vertices
+		var is_sel := i in SelectionState.vertices
 		if is_sel != only_selected: continue
 		_draw_dot(im, hem.get_vertex_position(i))
 		drew = true
@@ -429,8 +432,8 @@ func _draw_dot(im: ImmediateMesh, pos: Vector3) -> void:
 	im.surface_add_vertex(pos - right); im.surface_add_vertex(pos + up)
 
 func _ov_tool_preview(im: ImmediateMesh) -> void:
-	if GlobalState.active_tool != null:
-		GlobalState.active_tool.draw_preview(im, hem)
+	if SelectionState.active_tool != null:
+		SelectionState.active_tool.draw_preview(im, hem)
 	else:
 		im.surface_begin(Mesh.PRIMITIVE_LINES)
 		_dummy(im)
