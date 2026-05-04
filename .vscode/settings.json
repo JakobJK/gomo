@@ -1,0 +1,10 @@
+{
+    "files.exclude": {
+        "**/godot-cpp": true,
+        "**/vcpkg": true
+    },
+    "search.exclude": {
+        "**/godot-cpp": true,
+        "**/vcpkg": true
+    }
+}

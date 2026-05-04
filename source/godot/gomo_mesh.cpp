@@ -2,6 +2,9 @@
 
 #include "../geometry/mesh_ops.h"
 #include "../geometry/mesh_commands.h"
+#include "../geometry/create/box.h"
+#include "../geometry/subdivide.h"
+#include "../geometry/uv_unwrap.h"
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -16,16 +19,21 @@ using namespace godot;
 void HalfEdgeMesh::build_from_triangles(const PackedVector3Array &positions) {
     gomo::build_from_triangles(_mesh, positions.ptr(), positions.size());
     _history.clear();
+    _uvs_valid = false;
 }
 
-void HalfEdgeMesh::build_box() {
-    gomo::build_box(_mesh);
+void HalfEdgeMesh::build_box(float width, float height, float depth,
+                              int32_t width_segments, int32_t height_segments, int32_t depth_segments) {
+    gomo::build_box(_mesh, width, height, depth, width_segments, height_segments, depth_segments);
     _history.clear();
+    gomo::unwrap_uvs(_mesh);
+    _uvs_valid = true;
 }
 
 void HalfEdgeMesh::build_sphere(int32_t lat_segments, int32_t lon_segments) {
     gomo::build_sphere(_mesh, lat_segments, lon_segments);
     _history.clear();
+    _uvs_valid = false;
 }
 
 // --- Conversion ---
@@ -36,13 +44,16 @@ Ref<ArrayMesh> HalfEdgeMesh::to_array_mesh() const {
     for (int32_t fi = 0; fi < _mesh.face_count(); ++fi) {
         if (_mesh.faces[fi].half_edge == -1) continue;
 
-        auto fv_indices = gomo::get_face_vertex_indices(_mesh, fi);
-        if ((int)fv_indices.size() < 3) continue;
-
+        // Collect half-edges and positions in face order
+        std::vector<int32_t> fhe;
         std::vector<Vector3> fv;
-        fv.reserve(fv_indices.size());
-        for (int32_t vi : fv_indices)
-            fv.push_back(_mesh.vertices[vi].position);
+        int32_t he = _mesh.faces[fi].half_edge;
+        do {
+            fhe.push_back(he);
+            fv.push_back(_mesh.vertices[_mesh.half_edges[he].vertex].position);
+            he = _mesh.half_edges[he].next;
+        } while (he != _mesh.faces[fi].half_edge);
+        if ((int)fv.size() < 3) continue;
 
         gomo::FaceFrame frame    = gomo::compute_face_frame(_mesh, fi);
         Vector3         geo_norm = gomo::get_face_normal(_mesh, fi);
@@ -51,13 +62,18 @@ Ref<ArrayMesh> HalfEdgeMesh::to_array_mesh() const {
         PackedVector2Array uvs;
         PackedFloat32Array tans;
 
-        auto add_vert = [&](const Vector3 &p) {
+        auto add_vert = [&](int corner) {
+            const Vector3 &p = fv[corner];
             verts.push_back(p);
             norms.push_back(geo_norm);
-            Vector3 d = p - frame.origin;
-            float u = (frame.width  > 1e-6f) ? d.dot(frame.tangent)   / frame.width  : 0.0f;
-            float v = (frame.height > 1e-6f) ? d.dot(frame.bitangent) / frame.height : 0.0f;
-            uvs.push_back({u, v});
+            if (_uvs_valid) {
+                uvs.push_back(_mesh.half_edges[fhe[corner]].uv);
+            } else {
+                Vector3 d = p - frame.origin;
+                float u = (frame.width  > 1e-6f) ? d.dot(frame.tangent)   / frame.width  : 0.0f;
+                float v = (frame.height > 1e-6f) ? d.dot(frame.bitangent) / frame.height : 0.0f;
+                uvs.push_back({u, v});
+            }
             tans.push_back(frame.tangent.x);
             tans.push_back(frame.tangent.y);
             tans.push_back(frame.tangent.z);
@@ -65,9 +81,9 @@ Ref<ArrayMesh> HalfEdgeMesh::to_array_mesh() const {
         };
 
         for (int i = 1; i + 1 < (int)fv.size(); ++i) {
-            add_vert(fv[0]);
-            add_vert(fv[i + 1]);
-            add_vert(fv[i]);
+            add_vert(0);
+            add_vert(i + 1);
+            add_vert(i);
         }
 
         Array arrays;
@@ -257,6 +273,56 @@ Ref<Image> HalfEdgeMesh::get_face_normal_map(int32_t face_idx) const {
     return Image::create_from_data(S, S, false, Image::FORMAT_RGBA8, data);
 }
 
+// --- UV unwrapping ---
+
+void HalfEdgeMesh::unwrap_uvs() {
+    gomo::unwrap_uvs(_mesh);
+    _uvs_valid = true;
+}
+
+void HalfEdgeMesh::set_seam(int32_t he_idx, bool is_seam) {
+    ERR_FAIL_INDEX(he_idx, _mesh.half_edge_count());
+    _mesh.half_edges[he_idx].seam = is_seam;
+    int32_t twin = _mesh.half_edges[he_idx].twin;
+    if (twin != -1) _mesh.half_edges[twin].seam = is_seam;
+}
+
+bool HalfEdgeMesh::get_seam(int32_t he_idx) const {
+    ERR_FAIL_INDEX_V(he_idx, _mesh.half_edge_count(), false);
+    return _mesh.half_edges[he_idx].seam;
+}
+
+PackedVector2Array HalfEdgeMesh::get_uv_edges() const {
+    PackedVector2Array result;
+    for (int32_t hi = 0; hi < _mesh.half_edge_count(); ++hi) {
+        const auto &he = _mesh.half_edges[hi];
+        if (he.face == -1) continue;
+        // Each half-edge gives one directed UV edge; draw all so seam boundaries appear on both sides
+        result.push_back(he.uv);
+        result.push_back(_mesh.half_edges[he.next].uv);
+    }
+    return result;
+}
+
+void HalfEdgeMesh::translate_uvs(PackedVector2Array positions, Vector2 delta, float epsilon) {
+    float eps_sq = epsilon * epsilon;
+    for (auto &he : _mesh.half_edges) {
+        if (he.face == -1) continue;
+        for (int i = 0; i < positions.size(); ++i) {
+            if (he.uv.distance_squared_to(positions[i]) <= eps_sq) {
+                he.uv += delta;
+                break;
+            }
+        }
+    }
+}
+
+// --- Subdivision preview ---
+
+Ref<ArrayMesh> HalfEdgeMesh::subdivide_to_mesh(int32_t levels) const {
+    return gomo::subdivide_to_mesh(_mesh, levels);
+}
+
 // --- Undo / redo ---
 
 bool HalfEdgeMesh::undo() { return _history.undo(_mesh); }
@@ -267,13 +333,14 @@ bool HalfEdgeMesh::can_redo() const { return _history.can_redo(); }
 void HalfEdgeMesh::clear() {
     _mesh.clear();
     _history.clear();
+    _uvs_valid = false;
 }
 
 // --- Bindings ---
 
 void HalfEdgeMesh::_bind_methods() {
     ClassDB::bind_method(D_METHOD("build_from_triangles", "positions"), &HalfEdgeMesh::build_from_triangles);
-    ClassDB::bind_method(D_METHOD("build_box"),                         &HalfEdgeMesh::build_box);
+    ClassDB::bind_method(D_METHOD("build_box", "width", "height", "depth", "width_segments", "height_segments", "depth_segments"), &HalfEdgeMesh::build_box);
     ClassDB::bind_method(D_METHOD("build_sphere", "lat_segments", "lon_segments"), &HalfEdgeMesh::build_sphere);
     ClassDB::bind_method(D_METHOD("to_array_mesh"),                     &HalfEdgeMesh::to_array_mesh);
     ClassDB::bind_method(D_METHOD("get_vertex_count"),                  &HalfEdgeMesh::get_vertex_count);
@@ -301,6 +368,12 @@ void HalfEdgeMesh::_bind_methods() {
     ClassDB::bind_method(D_METHOD("end_tilt_stroke"),                     &HalfEdgeMesh::end_tilt_stroke);
     ClassDB::bind_method(D_METHOD("restore_tilt_to_stroke_base"),         &HalfEdgeMesh::restore_tilt_to_stroke_base);
     ClassDB::bind_method(D_METHOD("get_face_normal_map", "face_idx"),     &HalfEdgeMesh::get_face_normal_map);
+    ClassDB::bind_method(D_METHOD("subdivide_to_mesh", "levels"), &HalfEdgeMesh::subdivide_to_mesh);
+    ClassDB::bind_method(D_METHOD("unwrap_uvs"),                                    &HalfEdgeMesh::unwrap_uvs);
+    ClassDB::bind_method(D_METHOD("set_seam", "half_edge_index", "is_seam"),        &HalfEdgeMesh::set_seam);
+    ClassDB::bind_method(D_METHOD("get_seam", "half_edge_index"),                   &HalfEdgeMesh::get_seam);
+    ClassDB::bind_method(D_METHOD("get_uv_edges"),                                  &HalfEdgeMesh::get_uv_edges);
+    ClassDB::bind_method(D_METHOD("translate_uvs", "positions", "delta", "epsilon"), &HalfEdgeMesh::translate_uvs);
     ClassDB::bind_method(D_METHOD("undo"),      &HalfEdgeMesh::undo);
     ClassDB::bind_method(D_METHOD("redo"),      &HalfEdgeMesh::redo);
     ClassDB::bind_method(D_METHOD("can_undo"),  &HalfEdgeMesh::can_undo);

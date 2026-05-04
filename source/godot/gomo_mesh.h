@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
+#include <godot_cpp/variant/packed_vector2_array.hpp>
 
 #include "../geometry/half_edge_mesh.h"
 #include "../geometry/mesh_commands.h"
@@ -17,7 +18,8 @@ class HalfEdgeMesh : public godot::RefCounted {
 public:
     // Construction
     void build_from_triangles(const godot::PackedVector3Array &positions);
-    void build_box();
+    void build_box(float width = 2.0f, float height = 2.0f, float depth = 2.0f,
+                   int32_t width_segments = 1, int32_t height_segments = 1, int32_t depth_segments = 1);
     void build_sphere(int32_t lat_segments = 8, int32_t lon_segments = 16);
 
     // Conversion
@@ -63,6 +65,16 @@ public:
     void                     restore_tilt_to_stroke_base();
     godot::Ref<godot::Image> get_face_normal_map(int32_t face_idx) const;
 
+    // Subdivision preview
+    godot::Ref<godot::ArrayMesh> subdivide_to_mesh(int32_t levels = 2) const;
+
+    // UV unwrapping
+    void                      unwrap_uvs();
+    void                      set_seam(int32_t half_edge_index, bool is_seam);
+    bool                      get_seam(int32_t half_edge_index) const;
+    godot::PackedVector2Array get_uv_edges() const;
+    void                      translate_uvs(godot::PackedVector2Array positions, godot::Vector2 delta, float epsilon);
+
     // Undo / redo
     bool undo();
     bool redo();
@@ -78,4 +90,5 @@ private:
     gomo::HalfEdgeMesh                        _mesh;
     gomo::CommandHistory                      _history;
     std::unique_ptr<gomo::TiltStrokeCommand>  _pending_tilt_stroke;
+    bool                                      _uvs_valid = false;
 };

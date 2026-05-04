@@ -7,7 +7,6 @@ namespace gomo {
 
 // --- Construction ---
 void build_from_triangles(HalfEdgeMesh &mesh, const godot::Vector3 *positions, int32_t count);
-void build_box(HalfEdgeMesh &mesh);
 void build_sphere(HalfEdgeMesh &mesh, int32_t lat_segments = 8, int32_t lon_segments = 16);
 
 // --- Queries ---

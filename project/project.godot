@@ -13,3 +13,7 @@ config_version=5
 config/name="gomo"
 run/main_scene="uid://main"
 config/features=PackedStringArray("4.6")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/icon_explorer/plugin.cfg", "res://addons/lucide/plugin.cfg")

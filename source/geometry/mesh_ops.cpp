@@ -114,62 +114,6 @@ void build_from_triangles(HalfEdgeMesh &mesh, const Vector3 *positions, int32_t 
     }
 }
 
-void build_box(HalfEdgeMesh &mesh) {
-    mesh.clear();
-
-    const Vector3 p[8] = {
-        {-1,-1,-1}, { 1,-1,-1}, { 1, 1,-1}, {-1, 1,-1},
-        {-1,-1, 1}, { 1,-1, 1}, { 1, 1, 1}, {-1, 1, 1},
-    };
-    for (auto &v : p) mesh.vertices.push_back({v, -1});
-
-    const int32_t quads[6][4] = {
-        {1, 5, 4, 0},
-        {3, 7, 6, 2},
-        {4, 5, 6, 7},
-        {0, 3, 2, 1},
-        {0, 4, 7, 3},
-        {1, 2, 6, 5},
-    };
-
-    std::unordered_map<EdgeKey, int32_t, EdgeKeyHash> edge_map;
-
-    for (int f = 0; f < 6; ++f) {
-        int32_t face_index = (int32_t)mesh.faces.size();
-        mesh.faces.push_back({});
-
-        int32_t half_edge_base = (int32_t)mesh.half_edges.size();
-        mesh.half_edges.resize(half_edge_base + 4);
-        mesh.faces.back().half_edge = half_edge_base;
-
-        for (int i = 0; i < 4; ++i) {
-            int32_t cur          = half_edge_base + i;
-            int32_t next         = half_edge_base + (i + 1) % 4;
-            int32_t prev         = half_edge_base + (i + 3) % 4;
-            int32_t vertex_index = quads[f][i];
-
-            mesh.half_edges[cur].vertex = vertex_index;
-            mesh.half_edges[cur].next   = next;
-            mesh.half_edges[cur].prev   = prev;
-            mesh.half_edges[cur].face   = face_index;
-            mesh.half_edges[cur].twin   = -1;
-
-            if (mesh.vertices[vertex_index].half_edge == -1)
-                mesh.vertices[vertex_index].half_edge = cur;
-
-            edge_map[{vertex_index, quads[f][(i + 1) % 4]}] = cur;
-        }
-    }
-
-    for (auto &[key, half_edge_index] : edge_map) {
-        auto it = edge_map.find({key.b, key.a});
-        if (it != edge_map.end()) {
-            mesh.half_edges[half_edge_index].twin = it->second;
-            mesh.half_edges[it->second].twin      = half_edge_index;
-        }
-    }
-}
-
 
 void build_sphere(HalfEdgeMesh &mesh, int32_t lat_segments, int32_t lon_segments) {
     mesh.clear();

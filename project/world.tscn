@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://gomo_world"]
 
 [ext_resource type="Script" uid="uid://sxbmhrl15hil" path="res://main.gd" id="1"]
-[ext_resource type="Script" uid="uid://cdm4dwja20m0j" path="res://scripts/camera_controller.gd" id="2"]
+[ext_resource type="Script" uid="uid://cdm4dwja20m0j" path="res://ui/views/camera_controller.gd" id="2"]
 
 [sub_resource type="Environment" id="Environment_1"]
 

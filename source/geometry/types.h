@@ -1,6 +1,7 @@
 #pragma once
 
 #include <godot_cpp/variant/vector3.hpp>
+#include <godot_cpp/variant/vector2.hpp>
 #include <array>
 #include <cstdint>
 
@@ -17,6 +18,8 @@ struct HalfEdge {
     int32_t next   = -1;
     int32_t prev   = -1;
     int32_t face   = -1;
+    godot::Vector2 uv  = {};
+    bool           seam = false;
 };
 
 struct Face {

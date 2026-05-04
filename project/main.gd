@@ -50,7 +50,9 @@ func _ready() -> void:
 
 func setup() -> void:
 	var obj := _spawn_mesh_object()
-	obj.build_box()
+	obj.build_box(2.0, 2.0, 2.0,3,1,1)
+	var s := _spawn_mesh_object()
+	s.build_box()
 
 func _spawn_mesh_object() -> GomoMesh:
 	var obj := GomoMesh.new()
@@ -60,6 +62,11 @@ func _spawn_mesh_object() -> GomoMesh:
 	return obj
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("toggle_subdiv") and focused_object != null:
+		focused_object.toggle_subdiv_preview()
+		get_viewport().set_input_as_handled()
+		return
+
 	# Object-mode tool shortcuts — scene-wide, not per-object
 	if focused_object != null and focused_object.mode == GomoMesh.Mode.OBJECT:
 		if event.is_action_pressed("tool_move"):

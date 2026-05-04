@@ -1,0 +1,12 @@
+[gd_scene format=3 uid="uid://c4vm8bx3kqana"]
+
+[ext_resource type="Script" uid="uid://btb7qn2xr8f4c" path="res://ui/toolbar.gd" id="1"]
+
+[node name="ToolbarPanel" type="PanelContainer" unique_id=1001001001]
+
+[node name="ToolbarContent" type="HBoxContainer" parent="." unique_id=1002002002]
+script = ExtResource("1")
+
+[node name="MoveButton" type="Button" parent="ToolbarContent" unique_id=1003003003]
+toggle_mode = true
+flat = true
