@@ -1,15 +1,30 @@
 class_name SelectionState
 extends RefCounted
 
-# --- Active Tool ---
-static var active_tool: ModellingTool = null
+# --- Render Mode ---
+const RENDER_SHADED             := 0
+const RENDER_WIREFRAME          := 1
+const RENDER_WIREFRAME_ON_SHADED := 2
 
-static func set_tool(tool: ModellingTool) -> void:
+static var render_mode: int = RENDER_SHADED
+
+static func set_render_mode(mode: int) -> void:
+	render_mode = mode
+	EventBus.instance.render_mode_changed.emit(mode)
+
+# --- Active Tool ---
+static var active_tool: ViewportController = null
+static var move_tool:   MoveTool   = MoveTool.new()
+static var rotate_tool: RotateTool = RotateTool.new()
+static var scale_tool:  ScaleTool  = ScaleTool.new()
+
+static func set_tool(tool: ViewportController) -> void:
 	if active_tool != null:
 		active_tool.on_deactivate()
 	active_tool = tool
 	if active_tool != null:
 		active_tool.on_activate()
+	EventBus.instance.tool_changed.emit(tool)
 
 # --- Selection ---
 static var objects:  Array[GomoMesh] = []

@@ -1,7 +1,5 @@
 extends Node3D
 
-const _MoveTool = preload("res://tools/move_tool.gd")
-
 var camera: Camera3D:
 	set(v):
 		camera = v
@@ -62,31 +60,43 @@ func _spawn_mesh_object() -> GomoMesh:
 	return obj
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("toggle_subdiv") and focused_object != null:
+	if event.is_action_pressed("tool_none", false, true) and SelectionState.active_tool != null:
+		SelectionState.set_tool(null)
+		for obj in SelectionState.objects:
+			obj.redraw()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("tool_move", false, true):
+		SelectionState.set_tool(SelectionState.move_tool)
+		for obj in SelectionState.objects: obj.redraw()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("tool_rotate", false, true):
+		SelectionState.set_tool(SelectionState.rotate_tool)
+		for obj in SelectionState.objects: obj.redraw()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("tool_scale", false, true):
+		SelectionState.set_tool(SelectionState.scale_tool)
+		for obj in SelectionState.objects: obj.redraw()
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("toggle_subdiv", false, true) and focused_object != null:
 		focused_object.toggle_subdiv_preview()
 		get_viewport().set_input_as_handled()
 		return
 
-	# Object-mode tool shortcuts — scene-wide, not per-object
-	if focused_object != null and focused_object.mode == GomoMesh.Mode.OBJECT:
-		if event.is_action_pressed("tool_move"):
-			SelectionState.set_tool(null if SelectionState.active_tool is _MoveTool else _MoveTool.new())
-			focused_object.redraw()
-			get_viewport().set_input_as_handled()
-			return
-		if event.is_action_pressed("tool_none"):
-			SelectionState.set_tool(null)
-			focused_object.redraw()
-			get_viewport().set_input_as_handled()
-			return
-
 	# Mode switching
 	if focused_object != null:
 		var mode_key := -1
-		if   event.is_action_pressed("mode_object"): mode_key = GomoMesh.Mode.OBJECT
-		elif event.is_action_pressed("mode_vertex"): mode_key = GomoMesh.Mode.VERTEX
-		elif event.is_action_pressed("mode_edge"):   mode_key = GomoMesh.Mode.EDGE
-		elif event.is_action_pressed("mode_face"):   mode_key = GomoMesh.Mode.FACE
+		if   event.is_action_pressed("mode_object", false, true): mode_key = GomoMesh.Mode.OBJECT
+		elif event.is_action_pressed("mode_vertex", false, true): mode_key = GomoMesh.Mode.VERTEX
+		elif event.is_action_pressed("mode_edge",   false, true): mode_key = GomoMesh.Mode.EDGE
+		elif event.is_action_pressed("mode_face",   false, true): mode_key = GomoMesh.Mode.FACE
 		if mode_key != -1:
 			focused_object.set_mode(mode_key as GomoMesh.Mode)
 			get_viewport().set_input_as_handled()
@@ -107,8 +117,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed \
 			and not Input.is_key_pressed(Keymap.CAMERA_MODIFIER):
-		var ray_from := camera.project_ray_origin(event.position)
-		var ray_dir  := camera.project_ray_normal(event.position)
+		var vp_pos   := _subvp_mouse()
+		var ray_from := camera.project_ray_origin(vp_pos)
+		var ray_dir  := camera.project_ray_normal(vp_pos)
 
 		for obj in mesh_objects:
 			if obj.mode == GomoMesh.Mode.OBJECT and obj.ray_hits(ray_from, ray_dir):
@@ -120,6 +131,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		if focused_object != null and focused_object.mode == GomoMesh.Mode.OBJECT:
 			set_selection([])
 
+func _subvp_mouse() -> Vector2:
+	var subvp := camera.get_viewport()
+	var container := subvp.get_parent() as SubViewportContainer
+	if container == null: return subvp.get_mouse_position()
+	var rect := container.get_global_rect()
+	if rect.size.x <= 0.0: return subvp.get_mouse_position()
+	var win_mouse := container.get_viewport().get_mouse_position()
+	return (win_mouse - rect.position) / rect.size * Vector2(subvp.size)
+
 func set_selection(nodes: Array[Node]) -> void:
 	for obj in mesh_objects:
 		if SelectionState.has(obj):
@@ -129,6 +149,9 @@ func set_selection(nodes: Array[Node]) -> void:
 	for node in nodes:
 		if node is GomoMesh:
 			SelectionState.add(node)
+			SelectionState.set_context(node)
 			node.redraw()
 			focused_object = node
+	if nodes.is_empty():
+		SelectionState.set_context(null)
 	EventBus.instance.selection_changed.emit(nodes)

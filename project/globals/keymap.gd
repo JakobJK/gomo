@@ -14,13 +14,13 @@ static func setup() -> void:
 	_key("mode_edge",      KEY_3)
 	_key("mode_face",      KEY_4)
 	# Tools
-	_key("tool_move",      KEY_W)
-	_key("tool_sculpt",    KEY_S)
-	_key("tool_flatten",   KEY_F)
-	_key("tool_edge_loop", KEY_R, true)
 	_key("tool_none",      KEY_Q)
+	_key("tool_move",      KEY_W)
+	_key("tool_rotate",    KEY_E)
+	_key("tool_scale",     KEY_R)
+	_key("tool_edge_loop", KEY_R, true)
 	# Mesh operations
-	_key("op_extrude",     KEY_E)
+	_key("op_extrude",     KEY_E, true)
 	_key("op_delete",      KEY_X)
 	# Subdivision preview
 	_key("toggle_subdiv",  KEY_QUOTELEFT)

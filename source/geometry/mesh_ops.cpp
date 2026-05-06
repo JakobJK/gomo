@@ -1,6 +1,7 @@
 #include "mesh_ops.h"
 
 #include <unordered_map>
+#include <unordered_set>
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -9,7 +10,6 @@ using namespace godot;
 
 namespace gomo {
 
-// --- Internal helpers ---
 namespace {
 
 struct Vector3Hash {
@@ -32,30 +32,9 @@ struct EdgeKeyHash {
     }
 };
 
-static float lerp_f(float a, float b, float t) { return a + (b - a) * t; }
-
-static godot::Vector3 decode_normal(const gomo::FaceFrame &frame, godot::Vector3 geo_normal,
-                                     float tu, float tv) {
-    float tz = std::sqrt(std::max(0.0f, 1.0f - tu * tu - tv * tv));
-    return (geo_normal * tz + frame.tangent * tu + frame.bitangent * tv).normalized();
-}
-
-static void encode_normal(const gomo::FaceFrame &frame, godot::Vector3 n,
-                           float &tu, float &tv) {
-    tu = n.dot(frame.tangent);
-    tv = n.dot(frame.bitangent);
-}
-
-static Vector3 texel_world_pos(const FaceFrame &frame, int x, int y, int size) {
-    float u = (float)x / (size - 1);
-    float v = (float)y / (size - 1);
-    return frame.origin + frame.tangent * (u * frame.width) + frame.bitangent * (v * frame.height);
-}
-
 } // anonymous namespace
 
 
-// --- Construction ---
 
 void build_from_triangles(HalfEdgeMesh &mesh, const Vector3 *positions, int32_t count) {
     mesh.clear();
@@ -197,32 +176,6 @@ void build_sphere(HalfEdgeMesh &mesh, int32_t lat_segments, int32_t lon_segments
 
 // --- Queries ---
 
-FaceFrame compute_face_frame(const HalfEdgeMesh &mesh, int32_t face_index) {
-    std::vector<Vector3> face_positions;
-    int32_t half_edge = mesh.faces[face_index].half_edge;
-    do {
-        face_positions.push_back(mesh.vertices[mesh.half_edges[half_edge].vertex].position);
-        half_edge = mesh.half_edges[half_edge].next;
-    } while (half_edge != mesh.faces[face_index].half_edge);
-
-    Vector3 tangent   = (face_positions[1] - face_positions[0]).normalized();
-    Vector3 normal    = get_face_normal(mesh, face_index);
-    Vector3 bitangent = normal.cross(tangent).normalized();
-
-    float min_u =  1e38f, max_u = -1e38f;
-    float min_v =  1e38f, max_v = -1e38f;
-    for (auto &p : face_positions) {
-        Vector3 d = p - face_positions[0];
-        float u = d.dot(tangent);
-        float v = d.dot(bitangent);
-        min_u = std::min(min_u, u);  max_u = std::max(max_u, u);
-        min_v = std::min(min_v, v);  max_v = std::max(max_v, v);
-    }
-
-    Vector3 origin = face_positions[0] + tangent * min_u + bitangent * min_v;
-    return { origin, tangent, bitangent, max_u - min_u, max_v - min_v };
-}
-
 Vector3 get_face_normal(const HalfEdgeMesh &mesh, int32_t face_index) {
     Vector3 normal;
     int32_t half_edge = mesh.faces[face_index].half_edge;
@@ -332,7 +285,7 @@ std::vector<int32_t> extrude_edge(HalfEdgeMesh &mesh, int32_t half_edge_index) {
     mesh.vertices[new_vertex_a].half_edge = q2;
     mesh.vertices[new_vertex_b].half_edge = q3;
 
-    return {new_vertex_a, new_vertex_b};
+    return {q2};  // new top boundary half-edge, canonical ID for the extruded edge
 }
 
 std::vector<int32_t> extrude_face(HalfEdgeMesh &mesh, int32_t face_index) {
@@ -398,88 +351,151 @@ std::vector<int32_t> extrude_face(HalfEdgeMesh &mesh, int32_t face_index) {
 }
 
 
+std::vector<int32_t> extrude_edges(HalfEdgeMesh &mesh, const std::vector<int32_t> &half_edges) {
+    if (half_edges.empty()) return {};
 
-void paint_at(HalfEdgeMesh &mesh, Vector3 hit_pos, float strength, float world_radius) {
-    const int size = Face::HF_SIZE;
-    for (int32_t face_index = 0; face_index < (int32_t)mesh.faces.size(); ++face_index) {
-        if (mesh.faces[face_index].half_edge == -1) continue;
-        Vector3 geo_normal = get_face_normal(mesh, face_index);
-        if (geo_normal.dot(hit_pos - get_face_center(mesh, face_index)) < 0.0f) continue;
-        FaceFrame frame = compute_face_frame(mesh, face_index);
-        auto &tilt = mesh.faces[face_index].tilt;
-        for (int y = 0; y < size; ++y) {
-            for (int x = 0; x < size; ++x) {
-                Vector3 delta = texel_world_pos(frame, x, y, size) - hit_pos;
-                float dist = delta.length();
-                if (dist >= world_radius || dist < 1e-6f) continue;
-
-                // Target: push outward from brush centre, clamped to upper hemisphere.
-                Vector3 target = delta / dist;
-                float   below  = target.dot(geo_normal);
-                if (below < 0.0f) target = target - geo_normal * below;
-                float tlen = target.length();
-                if (tlen < 1e-6f) continue;
-                target = target / tlen;
-
-                float weight = strength * std::pow(1.0f - dist / world_radius, 2.0f);
-                weight = std::min(weight, 1.0f);
-
-                int idx = (y * size + x) * 2;
-                Vector3 current = decode_normal(frame, geo_normal, tilt[idx], tilt[idx + 1]);
-                Vector3 new_n   = (current + (target - current) * weight).normalized();
-                encode_normal(frame, new_n, tilt[idx], tilt[idx + 1]);
+    // One new vertex per unique old vertex — shared at junctions between connected edges
+    std::unordered_map<int32_t, int32_t> old_to_new;
+    for (int32_t he : half_edges) {
+        for (int32_t v : {mesh.half_edges[he].vertex,
+                          mesh.half_edges[mesh.half_edges[he].next].vertex}) {
+            if (!old_to_new.count(v)) {
+                old_to_new[v] = (int32_t)mesh.vertices.size();
+                mesh.vertices.push_back({mesh.vertices[v].position, -1});
             }
         }
     }
+
+    // up_at[V]   = q1 half-edge starting at V going toward new_V   (right side of its quad)
+    // down_at[V] = q3 half-edge starting at new_V going toward V   (left side of its quad)
+    // At a junction vertex both will exist and must be twinned.
+    std::unordered_map<int32_t, int32_t> up_at, down_at;
+
+    std::vector<int32_t> new_top_edges;
+
+    for (int32_t he : half_edges) {
+        int32_t va     = mesh.half_edges[he].vertex;
+        int32_t vb     = mesh.half_edges[mesh.half_edges[he].next].vertex;
+        int32_t new_va = old_to_new[va];
+        int32_t new_vb = old_to_new[vb];
+
+        int32_t fi   = (int32_t)mesh.faces.size();
+        int32_t base = (int32_t)mesh.half_edges.size();
+        mesh.faces.push_back({base});
+        mesh.half_edges.resize(base + 4);
+
+        int32_t q0 = base, q1 = base+1, q2 = base+2, q3 = base+3;
+        // quad ring: vb → va → new_va → new_vb (same winding as single extrude_edge)
+        mesh.half_edges[q0] = {vb,     he, q1, q3, fi};
+        mesh.half_edges[q1] = {va,     -1, q2, q0, fi};  // right side: va → new_va
+        mesh.half_edges[q2] = {new_va, -1, q3, q1, fi};  // top (new boundary)
+        mesh.half_edges[q3] = {new_vb, -1, q0, q2, fi};  // left side: new_vb → vb
+
+        mesh.half_edges[he].twin        = q0;
+        mesh.vertices[new_va].half_edge = q2;
+        mesh.vertices[new_vb].half_edge = q3;
+
+        new_top_edges.push_back(q2);
+
+        up_at[va]   = q1;  // at vertex va, this quad's right side goes up
+        down_at[vb] = q3;  // at vertex vb, this quad's left side comes down
+    }
+
+    // Twin junction side edges between adjacent quads
+    for (auto &[v, q1] : up_at) {
+        auto it = down_at.find(v);
+        if (it != down_at.end()) {
+            mesh.half_edges[q1].twin          = it->second;
+            mesh.half_edges[it->second].twin  = q1;
+        }
+    }
+
+    return new_top_edges;
 }
 
-void flatten_at(HalfEdgeMesh &mesh, Vector3 hit_pos, float strength, float world_radius) {
-    const int size = Face::HF_SIZE;
+std::vector<int32_t> extrude_faces(HalfEdgeMesh &mesh, const std::vector<int32_t> &face_indices) {
+    if (face_indices.empty()) return {};
 
-    struct FaceEntry { int32_t face_index; FaceFrame frame; Vector3 geo_normal; };
-    std::vector<FaceEntry> entries;
-    for (int32_t face_index = 0; face_index < (int32_t)mesh.faces.size(); ++face_index) {
-        if (mesh.faces[face_index].half_edge == -1) continue;
-        Vector3 geo_normal = get_face_normal(mesh, face_index);
-        float   d          = geo_normal.dot(hit_pos - get_face_center(mesh, face_index));
-        if (std::abs(d) >= world_radius) continue;
-        entries.push_back({face_index, compute_face_frame(mesh, face_index), geo_normal});
-    }
-    if (entries.empty()) return;
+    std::unordered_set<int32_t> selected(face_indices.begin(), face_indices.end());
 
-    // First pass: uniform average of all decoded normals inside the brush (flat-top falloff).
-    Vector3 avg_normal;
-    int     avg_count = 0;
-    for (auto &entry : entries) {
-        auto &tilt = mesh.faces[entry.face_index].tilt;
-        for (int y = 0; y < size; ++y) {
-            for (int x = 0; x < size; ++x) {
-                float dist = (texel_world_pos(entry.frame, x, y, size) - hit_pos).length();
-                if (dist >= world_radius) continue;
-                int idx = (y * size + x) * 2;
-                avg_normal += decode_normal(entry.frame, entry.geo_normal, tilt[idx], tilt[idx + 1]);
-                ++avg_count;
+    // Collect face rings and build one new vertex per unique old vertex
+    struct FaceRing { std::vector<int32_t> hes, verts, orig_twins; };
+    std::vector<FaceRing> rings(face_indices.size());
+    std::unordered_map<int32_t, int32_t> old_to_new;
+
+    for (int fi = 0; fi < (int)face_indices.size(); ++fi) {
+        int32_t he = mesh.faces[face_indices[fi]].half_edge;
+        do {
+            int32_t v = mesh.half_edges[he].vertex;
+            rings[fi].hes.push_back(he);
+            rings[fi].verts.push_back(v);
+            rings[fi].orig_twins.push_back(mesh.half_edges[he].twin);
+            if (!old_to_new.count(v)) {
+                old_to_new[v] = (int32_t)mesh.vertices.size();
+                mesh.vertices.push_back({mesh.vertices[v].position, -1});
             }
+            he = mesh.half_edges[he].next;
+        } while (he != mesh.faces[face_indices[fi]].half_edge);
+    }
+
+    // Redirect face half-edges to new vertices — original faces become the tops
+    for (auto &ring : rings)
+        for (int i = 0; i < (int)ring.hes.size(); ++i)
+            mesh.half_edges[ring.hes[i]].vertex = old_to_new[ring.verts[i]];
+
+    // up_at / down_at for corner twinning (same convention as extrude_edges)
+    std::unordered_map<int32_t, int32_t> up_at, down_at;
+
+    for (int fi = 0; fi < (int)face_indices.size(); ++fi) {
+        auto &ring = rings[fi];
+        int32_t N  = (int32_t)ring.hes.size();
+        for (int i = 0; i < N; ++i) {
+            int32_t he       = ring.hes[i];
+            int32_t orig_twin = ring.orig_twins[i];
+            int32_t va       = ring.verts[i];
+            int32_t vb       = ring.verts[(i + 1) % N];
+            int32_t new_va   = old_to_new[va];
+            int32_t new_vb   = old_to_new[vb];
+
+            // Skip interior edges — no side wall needed, twin relationship already intact
+            if (orig_twin != -1 && selected.count(mesh.half_edges[orig_twin].face))
+                continue;
+
+            int32_t side_fi = (int32_t)mesh.faces.size();
+            int32_t base    = (int32_t)mesh.half_edges.size();
+            mesh.faces.push_back({base});
+            mesh.half_edges.resize(base + 4);
+
+            int32_t q0 = base, q1 = base+1, q2 = base+2, q3 = base+3;
+            // q0: bottom (old edge, twins with outer mesh)
+            // q1: right side — vb → new_vb
+            // q2: top  — new_vb → new_va  (twins with the face's half-edge)
+            // q3: left side  — new_va → va
+            mesh.half_edges[q0] = {va,     orig_twin, q1, q3, side_fi};
+            mesh.half_edges[q1] = {vb,     -1,        q2, q0, side_fi};
+            mesh.half_edges[q2] = {new_vb, he,        q3, q1, side_fi};
+            mesh.half_edges[q3] = {new_va, -1,        q0, q2, side_fi};
+
+            if (orig_twin != -1) mesh.half_edges[orig_twin].twin = q0;
+            mesh.half_edges[he].twin        = q2;
+            mesh.vertices[va].half_edge     = q0;
+            mesh.vertices[new_va].half_edge = ring.hes[i];
+
+            up_at[vb]   = q1;  // right side: vb → new_vb
+            down_at[va] = q3;  // left side: new_va → va
         }
     }
-    if (avg_count == 0) return;
-    avg_normal = (avg_normal / (float)avg_count).normalized();
 
-    // Second pass: snap each texel uniformly toward the average.
-    for (auto &entry : entries) {
-        auto &tilt = mesh.faces[entry.face_index].tilt;
-        for (int y = 0; y < size; ++y) {
-            for (int x = 0; x < size; ++x) {
-                float dist = (texel_world_pos(entry.frame, x, y, size) - hit_pos).length();
-                if (dist >= world_radius) continue;
-                float weight = std::min(1.0f, strength);
-                int   idx    = (y * size + x) * 2;
-                Vector3 current = decode_normal(entry.frame, entry.geo_normal, tilt[idx], tilt[idx + 1]);
-                Vector3 new_n   = (current + (avg_normal - current) * weight).normalized();
-                encode_normal(entry.frame, new_n, tilt[idx], tilt[idx + 1]);
-            }
+    // Twin corners between adjacent side walls
+    for (auto &[v, q1] : up_at) {
+        auto it = down_at.find(v);
+        if (it != down_at.end()) {
+            mesh.half_edges[q1].twin         = it->second;
+            mesh.half_edges[it->second].twin = q1;
         }
     }
+
+    return face_indices;
 }
 
 } // namespace gomo

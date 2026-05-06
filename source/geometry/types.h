@@ -2,7 +2,6 @@
 
 #include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/vector2.hpp>
-#include <array>
 #include <cstdint>
 
 namespace gomo {
@@ -23,15 +22,7 @@ struct HalfEdge {
 };
 
 struct Face {
-    static constexpr int HF_SIZE = 64;
     int32_t half_edge = -1;
-    std::array<float, HF_SIZE * HF_SIZE * 2> tilt = {};
-};
-
-struct FaceFrame {
-    godot::Vector3 origin, tangent, bitangent;
-    float width  = 0.0f;
-    float height = 0.0f;
 };
 
 } // namespace gomo

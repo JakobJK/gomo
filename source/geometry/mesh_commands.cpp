@@ -1,6 +1,8 @@
 #include "mesh_commands.h"
 #include "mesh_ops.h"
 
+#include <unordered_set>
+
 namespace gomo {
 
 // ---------------------------------------------------------------------------
@@ -41,71 +43,84 @@ void DeleteFaceCommand::undo_it(HalfEdgeMesh &mesh) {
 }
 
 // ---------------------------------------------------------------------------
-// ExtrudeEdgeCommand
+// ExtrudeEdgesCommand
 // ---------------------------------------------------------------------------
 
-ExtrudeEdgeCommand::ExtrudeEdgeCommand(int32_t half_edge_index)
-    : _half_edge_index(half_edge_index)
+ExtrudeEdgesCommand::ExtrudeEdgesCommand(std::vector<int32_t> half_edges)
+    : _half_edges(std::move(half_edges))
 {}
 
-void ExtrudeEdgeCommand::do_it(HalfEdgeMesh &mesh) {
+void ExtrudeEdgesCommand::do_it(HalfEdgeMesh &mesh) {
     _vertex_count_before    = mesh.vertex_count();
     _half_edge_count_before = mesh.half_edge_count();
     _face_count_before      = mesh.face_count();
-    _new_vertex_indices     = extrude_edge(mesh, _half_edge_index);
+    _new_edge_indices = extrude_edges(mesh, _half_edges);
 }
 
-void ExtrudeEdgeCommand::redo_it(HalfEdgeMesh &mesh) {
-    extrude_edge(mesh, _half_edge_index);
+void ExtrudeEdgesCommand::redo_it(HalfEdgeMesh &mesh) {
+    extrude_edges(mesh, _half_edges);
 }
 
-void ExtrudeEdgeCommand::undo_it(HalfEdgeMesh &mesh) {
-    mesh.half_edges[_half_edge_index].twin = -1;
+void ExtrudeEdgesCommand::undo_it(HalfEdgeMesh &mesh) {
+    for (int32_t he : _half_edges)
+        mesh.half_edges[he].twin = -1;
     mesh.vertices.resize(_vertex_count_before);
     mesh.half_edges.resize(_half_edge_count_before);
     mesh.faces.resize(_face_count_before);
 }
 
 // ---------------------------------------------------------------------------
-// ExtrudeFaceCommand
+// ExtrudeFacesCommand
 // ---------------------------------------------------------------------------
 
-ExtrudeFaceCommand::ExtrudeFaceCommand(int32_t face_index)
-    : _face_index(face_index)
+ExtrudeFacesCommand::ExtrudeFacesCommand(std::vector<int32_t> face_indices)
+    : _face_indices(std::move(face_indices))
 {}
 
-void ExtrudeFaceCommand::do_it(HalfEdgeMesh &mesh) {
+void ExtrudeFacesCommand::do_it(HalfEdgeMesh &mesh) {
     _vertex_count_before    = mesh.vertex_count();
     _half_edge_count_before = mesh.half_edge_count();
     _face_count_before      = mesh.face_count();
 
-    int32_t he = mesh.faces[_face_index].half_edge;
-    do {
-        _face_half_edges.push_back(he);
-        int32_t vi = mesh.half_edges[he].vertex;
-        _face_vertices.push_back(vi);
-        _original_twins.push_back(mesh.half_edges[he].twin);
-        _original_vertex_he.push_back(mesh.vertices[vi].half_edge);
-        he = mesh.half_edges[he].next;
-    } while (he != mesh.faces[_face_index].half_edge);
+    std::unordered_set<int32_t> selected(_face_indices.begin(), _face_indices.end());
 
-    _new_vertex_indices = extrude_face(mesh, _face_index);
-}
-
-void ExtrudeFaceCommand::redo_it(HalfEdgeMesh &mesh) {
-    extrude_face(mesh, _face_index);
-}
-
-void ExtrudeFaceCommand::undo_it(HalfEdgeMesh &mesh) {
-    int32_t N = (int32_t)_face_half_edges.size();
-    for (int32_t i = 0; i < N; ++i) {
-        mesh.half_edges[_face_half_edges[i]].vertex = _face_vertices[i];
-        mesh.half_edges[_face_half_edges[i]].twin   = _original_twins[i];
-        if (_original_twins[i] != -1)
-            mesh.half_edges[_original_twins[i]].twin = _face_half_edges[i];
-        mesh.vertices[_face_vertices[i]].half_edge = _original_vertex_he[i];
+    _face_undos.resize(_face_indices.size());
+    for (int fi = 0; fi < (int)_face_indices.size(); ++fi) {
+        auto &u    = _face_undos[fi];
+        int32_t he = mesh.faces[_face_indices[fi]].half_edge;
+        do {
+            int32_t v    = mesh.half_edges[he].vertex;
+            int32_t twin = mesh.half_edges[he].twin;
+            u.half_edges.push_back(he);
+            u.orig_vertices.push_back(v);
+            u.orig_twins.push_back(twin);
+            u.orig_vertex_he.push_back(mesh.vertices[v].half_edge);
+            u.orig_outer_twins.push_back(
+                (twin != -1 && !selected.count(mesh.half_edges[twin].face)) ? twin : -1
+            );
+            he = mesh.half_edges[he].next;
+        } while (he != mesh.faces[_face_indices[fi]].half_edge);
     }
 
+    extrude_faces(mesh, _face_indices);
+}
+
+void ExtrudeFacesCommand::redo_it(HalfEdgeMesh &mesh) {
+    extrude_faces(mesh, _face_indices);
+}
+
+void ExtrudeFacesCommand::undo_it(HalfEdgeMesh &mesh) {
+    for (auto &u : _face_undos) {
+        for (int i = 0; i < (int)u.half_edges.size(); ++i) {
+            int32_t he     = u.half_edges[i];
+            int32_t orig_v = u.orig_vertices[i];
+            mesh.half_edges[he].vertex      = orig_v;
+            mesh.half_edges[he].twin        = u.orig_twins[i];
+            mesh.vertices[orig_v].half_edge = u.orig_vertex_he[i];
+            if (u.orig_outer_twins[i] != -1)
+                mesh.half_edges[u.orig_outer_twins[i]].twin = he;
+        }
+    }
     mesh.vertices.resize(_vertex_count_before);
     mesh.half_edges.resize(_half_edge_count_before);
     mesh.faces.resize(_face_count_before);
@@ -132,30 +147,5 @@ void MoveVerticesCommand::undo_it(HalfEdgeMesh &mesh) {
     for (int32_t i = 0; i < (int32_t)_indices.size(); ++i)
         mesh.vertices[_indices[i]].position = _old_positions[i];
 }
-
-// ---------------------------------------------------------------------------
-// TiltStrokeCommand
-// ---------------------------------------------------------------------------
-
-void TiltStrokeCommand::_capture(const HalfEdgeMesh &mesh, std::vector<FaceTilt> &out) {
-    out.clear();
-    for (int32_t fi = 0; fi < mesh.face_count(); ++fi) {
-        if (mesh.faces[fi].half_edge == -1) continue;
-        out.push_back({fi, std::vector<float>(mesh.faces[fi].tilt.begin(),
-                                               mesh.faces[fi].tilt.end())});
-    }
-}
-
-void TiltStrokeCommand::_apply(HalfEdgeMesh &mesh, const std::vector<FaceTilt> &tilts) {
-    for (const auto &ft : tilts)
-        std::copy(ft.tilt.begin(), ft.tilt.end(), mesh.faces[ft.face_index].tilt.begin());
-}
-
-void TiltStrokeCommand::capture_before(const HalfEdgeMesh &mesh) { _capture(mesh, _before); }
-void TiltStrokeCommand::capture_after(const HalfEdgeMesh &mesh)  { _capture(mesh, _after);  }
-void TiltStrokeCommand::restore_before(HalfEdgeMesh &mesh)       { _apply(mesh, _before);   }
-
-void TiltStrokeCommand::redo_it(HalfEdgeMesh &mesh) { _apply(mesh, _after);  }
-void TiltStrokeCommand::undo_it(HalfEdgeMesh &mesh) { _apply(mesh, _before); }
 
 } // namespace gomo

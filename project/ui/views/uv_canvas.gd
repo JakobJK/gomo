@@ -2,6 +2,8 @@ extends Control
 
 var edges: PackedVector2Array = []
 var gomo_mesh = null  # GomoMesh
+var _background: ImageTexture = null
+var last_baked_image: Image    = null
 
 var _zoom: float = 1.0
 var _pan: Vector2 = Vector2.ZERO
@@ -110,8 +112,19 @@ func _nearest_uv_vert(uv: Vector2) -> Vector2:
 			best = pt
 	return best
 
+func _ready() -> void:
+	EventBus.instance.normal_map_baked.connect(func(image: Image):
+		last_baked_image = image
+		var display := image.duplicate()
+		display.flip_y()
+		_background = ImageTexture.create_from_image(display)
+		queue_redraw()
+	)
+
 func _draw() -> void:
 	draw_rect(Rect2(_pan, Vector2(_zoom, _zoom)), Color(0.12, 0.12, 0.12, 1.0))
+	if _background != null:
+		draw_texture_rect(_background, Rect2(_pan, Vector2(_zoom, _zoom)), false)
 	if not edges.is_empty():
 		var col := Color(0.8, 0.8, 0.8, 1.0)
 		var i := 0

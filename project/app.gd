@@ -1,9 +1,13 @@
 extends Node
 
 @onready var world:             Node3D          = $World
-@onready var view_panel:        GomoViewport    = $UI/Viewport
-@onready var scene_panel:       ScenePanel      = $UI/ScenePanel
-@onready var properties_panel:  PropertiesPanel = $UI/PropertiesPanel
+@onready var view_panel:        Control    = $UI/vbox/HBox/HSplit/Viewport
+@onready var scene_panel:       ScenePanel      = $UI/vbox/HBox/ScenePanel
+@onready var properties_panel:  PropertiesPanel = $UI/vbox/HBox/PropertiesPanel
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.keycode == KEY_TAB:
+		get_viewport().set_input_as_handled()
 
 func _ready() -> void:
 	var remote := world.get_node("perspective/RemoteTransform3D") as RemoteTransform3D

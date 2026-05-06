@@ -1,7 +1,6 @@
 extends Node3D
 class_name GomoMesh
 
-const _MoveTool = preload("res://tools/move_tool.gd")
 
 enum Mode { OBJECT, VERTEX, EDGE, FACE }
 
@@ -34,6 +33,7 @@ var _mat_tool_preview: StandardMaterial3D
 var _mat_subdiv: StandardMaterial3D
 
 func _ready() -> void:
+	EventBus.instance.render_mode_changed.connect(func(_m): refresh())
 	_mesh_instance = MeshInstance3D.new()
 	add_child(_mesh_instance)
 	_overlay = MeshInstance3D.new()
@@ -73,20 +73,32 @@ func _make_wire(color: Color) -> StandardMaterial3D:
 func _process(_delta: float) -> void:
 	if camera == null:
 		return
+	var vp_mouse := _subvp_mouse()
 	if mode == Mode.OBJECT:
 		if SelectionState.active_tool != null and SelectionState.has(self):
 			_sync_tool_state()
-			SelectionState.active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
+			SelectionState.active_tool.handle_hover(vp_mouse, hem, camera)
 			_draw_overlay()
 		return
 	if SelectionState.active_tool != null:
 		_sync_tool_state()
-		SelectionState.active_tool.handle_hover(get_viewport().get_mouse_position(), hem, camera)
+		SelectionState.active_tool.handle_hover(vp_mouse, hem, camera)
 	else:
-		_update_hover(get_viewport().get_mouse_position())
+		_update_hover(vp_mouse)
 	_draw_overlay()
 
 # --- Public API ---
+
+func apply_baked_normal_map(subdiv_levels: int = 2, resolution: int = 1024) -> void:
+	var image := hem.bake_normal_map(subdiv_levels, resolution)
+	if image == null:
+		return
+	var tex := ImageTexture.create_from_image(image)
+	_mat_mesh.normal_enabled   = true
+	_mat_mesh.normal_texture   = tex
+	_mat_subdiv.normal_enabled = true
+	_mat_subdiv.normal_texture = tex
+	EventBus.instance.normal_map_baked.emit(image)
 
 func toggle_subdiv_preview(levels: int = 2) -> void:
 	_subdiv_visible = not _subdiv_visible
@@ -120,10 +132,10 @@ func set_mode(new_mode: Mode) -> void:
 		SelectionState.set_context(null)
 	else:
 		SelectionState.set_context(self)
-	set_tool(null)
+	EventBus.instance.mode_changed.emit(mode)
 	refresh()
 
-func set_tool(tool: ModellingTool) -> void:
+func set_tool(tool: ViewportController) -> void:
 	SelectionState.set_tool(tool)
 	if SelectionState.active_tool != null:
 		_sync_tool_state()
@@ -140,11 +152,11 @@ func ray_hits(ray_from: Vector3, ray_dir: Vector3) -> bool:
 # Called by main. Returns true if event was consumed.
 func handle_input(event: InputEvent) -> bool:
 	# Undo/redo always first
-	if event.is_action_pressed("redo"):
+	if event.is_action_pressed("redo", false, true):
 		var changed := hem.redo()
 		if changed: _clear_selection(); refresh()
 		return true
-	if event.is_action_pressed("undo"):
+	if event.is_action_pressed("undo", false, true):
 		var changed := hem.undo()
 		if changed: _clear_selection(); refresh()
 		return true
@@ -159,19 +171,19 @@ func handle_input(event: InputEvent) -> bool:
 		return false
 
 	# Tool switching
-	if event.is_action_pressed("tool_none"):
+	if event.is_action_pressed("tool_none", false, true):
 		set_tool(null)
 		return true
-	if event.is_action_pressed("tool_move"):
-		set_tool(null if SelectionState.active_tool is _MoveTool else _MoveTool.new())
+	if event.is_action_pressed("tool_move", false, true):
+		set_tool(SelectionState.move_tool)
 		return true
-	if event.is_action_pressed("tool_sculpt") and mode == Mode.FACE:
-		set_tool(null if SelectionState.active_tool is SculptTool else SculptTool.new())
+	if event.is_action_pressed("tool_rotate", false, true):
+		set_tool(SelectionState.rotate_tool)
 		return true
-	if event.is_action_pressed("tool_flatten") and mode == Mode.FACE:
-		set_tool(null if SelectionState.active_tool is FlattenTool else FlattenTool.new())
+	if event.is_action_pressed("tool_scale", false, true):
+		set_tool(SelectionState.scale_tool)
 		return true
-	if event.is_action_pressed("tool_edge_loop") and mode == Mode.EDGE:
+	if event.is_action_pressed("tool_edge_loop", false, true) and mode == Mode.EDGE:
 		set_tool(null if SelectionState.active_tool is EdgeLoopTool else EdgeLoopTool.new())
 		return true
 
@@ -183,14 +195,14 @@ func handle_input(event: InputEvent) -> bool:
 			return true
 
 	# Operations
-	if event.is_action_pressed("op_extrude"): return _do_extrude()
-	if event.is_action_pressed("op_delete"):  return _do_delete()
+	if event.is_action_pressed("op_extrude", false, true): return _do_extrude()
+	if event.is_action_pressed("op_delete",  false, true): return _do_delete()
 
 	# Selection
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		if Input.is_key_pressed(Keymap.CAMERA_MODIFIER):
 			return false
-		_handle_selection_click(event.position, event.shift_pressed)
+		_handle_selection_click(_subvp_mouse(), event.shift_pressed)
 		return true
 
 	return false
@@ -201,16 +213,28 @@ func _do_extrude() -> bool:
 	match mode:
 		Mode.EDGE:
 			if SelectionState.edges.is_empty(): return false
-			var he := SelectionState.edges[0]
-			if hem.get_half_edge_twin(he) != -1: return false
-			hem.extrude_edge(he)
+			var boundary_edges := PackedInt32Array()
+			for he in SelectionState.edges:
+				if hem.get_half_edge_twin(he) == -1:
+					boundary_edges.append(he)
+			if boundary_edges.is_empty(): return false
+			var new_edges := hem.extrude_edges(boundary_edges)
 			SelectionState.clear_components()
+			for i in new_edges:
+				SelectionState.add_edge(i)
+			if not SelectionState.active_tool is MoveTool:
+				set_tool(SelectionState.move_tool)
+			_sync_tool_state()
 			refresh()
 			return true
 		Mode.FACE:
 			if SelectionState.faces.is_empty(): return false
-			hem.extrude_face(SelectionState.faces[0])
+			var new_faces := hem.extrude_faces(PackedInt32Array(SelectionState.faces))
 			SelectionState.clear_components()
+			for fi in new_faces:
+				SelectionState.add_face(fi)
+			if not SelectionState.active_tool is MoveTool:
+				set_tool(SelectionState.move_tool)
 			_sync_tool_state()
 			refresh()
 			return true
@@ -300,6 +324,16 @@ func _clear_selection() -> void:
 	hovered_edge   = -1
 	hovered_face   = -1
 
+func _subvp_mouse() -> Vector2:
+	if camera == null: return Vector2.ZERO
+	var subvp := camera.get_viewport()
+	var container := subvp.get_parent() as SubViewportContainer
+	if container == null: return subvp.get_mouse_position()
+	var rect := container.get_global_rect()
+	if rect.size.x <= 0.0: return subvp.get_mouse_position()
+	var win_mouse := container.get_viewport().get_mouse_position()
+	return (win_mouse - rect.position) / rect.size * Vector2(subvp.size)
+
 # --- Rendering ---
 
 func refresh() -> void:
@@ -307,6 +341,7 @@ func refresh() -> void:
 	for i in array_mesh.get_surface_count():
 		array_mesh.surface_set_material(i, _mat_mesh)
 	_mesh_instance.mesh = array_mesh
+	_mesh_instance.visible = SelectionState.render_mode != SelectionState.RENDER_WIREFRAME
 	if _subdiv_visible:
 		_update_subdiv()
 	_draw_overlay()
@@ -317,19 +352,26 @@ func _draw_overlay() -> void:
 
 	match mode:
 		Mode.OBJECT:
-			if SelectionState.has(self):
+			var rm := SelectionState.render_mode
+			var show_wire := SelectionState.has(self) or rm != SelectionState.RENDER_SHADED
+			if show_wire:
 				im.surface_begin(Mesh.PRIMITIVE_LINES)
 				for i in hem.get_edge_count():
 					var twin: int = hem.get_half_edge_twin(i)
+					if twin == -1 and hem.get_half_edge_face(i) == -1: continue
 					if twin != -1 and i > twin: continue
 					im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(i)))
 					im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(i))))
 				im.surface_end()
-				_ov_tool_preview(im)
+				var is_selected := SelectionState.has(self)
+				if is_selected:
+					_ov_tool_preview(im)
 				_overlay.mesh = im
-				_overlay.set_surface_override_material(0, _mat_wire_object)
-				_overlay.set_surface_override_material(1, _mat_tool_preview)
-				_overlay.set_surface_override_material(2, _mat_tool_preview)
+				var wire_mat := _mat_wire_object if is_selected else _mat_wire_dim
+				_overlay.set_surface_override_material(0, wire_mat)
+				if is_selected:
+					_overlay.set_surface_override_material(1, _mat_tool_preview)
+					_overlay.set_surface_override_material(2, _mat_tool_preview)
 			else:
 				_overlay.mesh = null
 

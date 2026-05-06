@@ -1,4 +1,4 @@
-extends ModellingTool
+extends ViewportController
 class_name EdgeLoopTool
 
 const PICK_EDGE_PX := 12.0

@@ -1,5 +1,4 @@
-class_name GomoViewport
-extends SubViewportContainer
+extends Control
 
-@onready var viewport: SubViewport = $SubViewport
-@onready var camera:   Camera3D    = $SubViewport/perspective
+@onready var viewport: SubViewport = $VBoxContainer/SubViewport/SubViewport
+@onready var camera:   Camera3D    = $VBoxContainer/SubViewport/SubViewport/perspective

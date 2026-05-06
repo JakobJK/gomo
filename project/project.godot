@@ -14,6 +14,10 @@ config/name="gomo"
 run/main_scene="uid://main"
 config/features=PackedStringArray("4.6")
 
+[display]
+
+window/size/mode=2
+
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/icon_explorer/plugin.cfg", "res://addons/lucide/plugin.cfg")
+enabled=PackedStringArray()

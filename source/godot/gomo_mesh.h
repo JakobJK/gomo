@@ -49,24 +49,19 @@ public:
     int32_t                 pick_face(godot::Vector3 ray_from, godot::Vector3 ray_dir) const;
 
     // Topology operations (all recorded to undo history)
-    godot::PackedInt32Array extrude_edge(int32_t half_edge_index);
-    godot::PackedInt32Array extrude_face(int32_t face_idx);
+    godot::PackedInt32Array extrude_edges(godot::PackedInt32Array half_edges);
+    godot::PackedInt32Array extrude_faces(godot::PackedInt32Array face_indices);
     void                    delete_face(int32_t face_idx);
 
     // Vertex move (record after drag ends — vertices already at new positions)
     void record_move_vertices(godot::PackedInt32Array indices,
                               godot::PackedVector3Array old_positions);
 
-    // Sculpting (paint_at / flatten_at are recorded via begin/end_tilt_stroke)
-    void                     paint_at(godot::Vector3 hit_pos, float strength, float world_radius);
-    void                     flatten_at(godot::Vector3 hit_pos, float strength, float world_radius);
-    void                     begin_tilt_stroke();
-    void                     end_tilt_stroke();
-    void                     restore_tilt_to_stroke_base();
-    godot::Ref<godot::Image> get_face_normal_map(int32_t face_idx) const;
-
     // Subdivision preview
     godot::Ref<godot::ArrayMesh> subdivide_to_mesh(int32_t levels = 2) const;
+
+    // Normal map baking
+    godot::Ref<godot::Image> bake_normal_map(int32_t subdiv_levels, int32_t resolution) const;
 
     // UV unwrapping
     void                      unwrap_uvs();
@@ -87,8 +82,7 @@ protected:
     static void _bind_methods();
 
 private:
-    gomo::HalfEdgeMesh                        _mesh;
-    gomo::CommandHistory                      _history;
-    std::unique_ptr<gomo::TiltStrokeCommand>  _pending_tilt_stroke;
-    bool                                      _uvs_valid = false;
+    gomo::HalfEdgeMesh   _mesh;
+    gomo::CommandHistory _history;
+    bool                 _uvs_valid = false;
 };

@@ -17,6 +17,8 @@ public:
     int32_t vertex_count()    const { return static_cast<int32_t>(vertices.size()); }
     int32_t half_edge_count() const { return static_cast<int32_t>(half_edges.size()); }
     int32_t face_count()      const { return static_cast<int32_t>(faces.size()); }
+
+    std::vector<int32_t> get_connected_edges(int32_t edge_idx);
 };
 
 } // namespace gomo

@@ -68,7 +68,6 @@ void build_box(HalfEdgeMesh &mesh,
         return idx;
     };
 
-    // --- Allocate vertices ---
 
     for (int v = 0; v <= ds; ++v)
         for (int u = 0; u <= ws; ++u)

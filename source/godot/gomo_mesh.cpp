@@ -4,6 +4,7 @@
 #include "../geometry/mesh_commands.h"
 #include "../geometry/create/box.h"
 #include "../geometry/subdivide.h"
+#include "../geometry/bake.h"
 #include "../geometry/uv_unwrap.h"
 
 #include <godot_cpp/core/class_db.hpp>
@@ -55,35 +56,65 @@ Ref<ArrayMesh> HalfEdgeMesh::to_array_mesh() const {
         } while (he != _mesh.faces[fi].half_edge);
         if ((int)fv.size() < 3) continue;
 
-        gomo::FaceFrame frame    = gomo::compute_face_frame(_mesh, fi);
-        Vector3         geo_norm = gomo::get_face_normal(_mesh, fi);
+        Vector3 geo_norm  = gomo::get_face_normal(_mesh, fi);
+        // Geometry tangent used only for UV fallback projection
+        Vector3 geom_tan = (fv[1] - fv[0]).normalized();
+        Vector3 geom_bit = geo_norm.cross(geom_tan).normalized();
+
+        Vector3 uv_origin;
+        float   uv_width = 0.0f, uv_height = 0.0f;
+        if (!_uvs_valid) {
+            float min_u = 1e38f, max_u = -1e38f, min_v = 1e38f, max_v = -1e38f;
+            for (auto &p : fv) {
+                Vector3 d = p - fv[0];
+                float u = d.dot(geom_tan), v = d.dot(geom_bit);
+                if (u < min_u) min_u = u;  if (u > max_u) max_u = u;
+                if (v < min_v) min_v = v;  if (v > max_v) max_v = v;
+            }
+            uv_origin = fv[0] + geom_tan * min_u + geom_bit * min_v;
+            uv_width  = max_u - min_u;
+            uv_height = max_v - min_v;
+        }
 
         PackedVector3Array verts, norms;
         PackedVector2Array uvs;
         PackedFloat32Array tans;
 
-        auto add_vert = [&](int corner) {
+        auto get_uv = [&](int corner) -> Vector2 {
+            if (_uvs_valid) return _mesh.half_edges[fhe[corner]].uv;
             const Vector3 &p = fv[corner];
-            verts.push_back(p);
-            norms.push_back(geo_norm);
-            if (_uvs_valid) {
-                uvs.push_back(_mesh.half_edges[fhe[corner]].uv);
-            } else {
-                Vector3 d = p - frame.origin;
-                float u = (frame.width  > 1e-6f) ? d.dot(frame.tangent)   / frame.width  : 0.0f;
-                float v = (frame.height > 1e-6f) ? d.dot(frame.bitangent) / frame.height : 0.0f;
-                uvs.push_back({u, v});
-            }
-            tans.push_back(frame.tangent.x);
-            tans.push_back(frame.tangent.y);
-            tans.push_back(frame.tangent.z);
-            tans.push_back(1.0f);
+            Vector3 d = p - uv_origin;
+            float u = (uv_width  > 1e-6f) ? d.dot(geom_tan) / uv_width  : 0.0f;
+            float v = (uv_height > 1e-6f) ? d.dot(geom_bit)  / uv_height : 0.0f;
+            return {u, v};
         };
 
+        auto add_vert = [&](int corner, const Vector3 &T, float tw) {
+            verts.push_back(fv[corner]);
+            norms.push_back(geo_norm);
+            uvs.push_back(get_uv(corner));
+            tans.push_back(T.x); tans.push_back(T.y); tans.push_back(T.z); tans.push_back(tw);
+        };
+
+        // Compute one tangent for the whole face so every fan triangle shares the same frame.
+        Vector3 T = geom_tan;
+        float   tw = 1.0f;
+        {
+            Vector2 uv0 = get_uv(0), uv1 = get_uv(1), uv2 = get_uv((int)fv.size() - 1);
+            Vector3 dP1 = fv[1] - fv[0], dP2 = fv[(int)fv.size() - 1] - fv[0];
+            Vector2 dUV1 = uv1 - uv0, dUV2 = uv2 - uv0;
+            float det = dUV1.x * dUV2.y - dUV2.x * dUV1.y;
+            if (std::abs(det) > 1e-10f) {
+                float r = 1.0f / det;
+                T  = (dP1 * dUV2.y - dP2 * dUV1.y) * r;
+                T  = (T - geo_norm * geo_norm.dot(T)).normalized();
+                tw = (det > 0.0f) ? 1.0f : -1.0f;
+            }
+        }
+
         for (int i = 1; i + 1 < (int)fv.size(); ++i) {
-            add_vert(0);
-            add_vert(i + 1);
-            add_vert(i);
+            int c0 = 0, c1 = i + 1, c2 = i;
+            add_vert(c0, T, tw); add_vert(c1, T, tw); add_vert(c2, T, tw);
         }
 
         Array arrays;
@@ -173,25 +204,37 @@ int32_t HalfEdgeMesh::pick_face(Vector3 ray_from, Vector3 ray_dir) const {
 }
 
 // --- Topology operations ---
-PackedInt32Array HalfEdgeMesh::extrude_edge(int32_t half_edge_index) {
-    ERR_FAIL_INDEX_V(half_edge_index, _mesh.half_edge_count(), PackedInt32Array());
-    ERR_FAIL_COND_V_MSG(_mesh.half_edges[half_edge_index].twin != -1, PackedInt32Array(),
-                        "extrude_edge requires a boundary half-edge (twin == -1)");
-    auto  cmd = std::make_unique<gomo::ExtrudeEdgeCommand>(half_edge_index);
+PackedInt32Array HalfEdgeMesh::extrude_edges(PackedInt32Array half_edges) {
+    int32_t n = half_edges.size();
+    std::vector<int32_t> hes(n);
+    for (int32_t i = 0; i < n; ++i) {
+        int32_t he = half_edges[i];
+        ERR_FAIL_INDEX_V(he, _mesh.half_edge_count(), PackedInt32Array());
+        ERR_FAIL_COND_V_MSG(_mesh.half_edges[he].twin != -1, PackedInt32Array(),
+                            "extrude_edges requires boundary half-edges (twin == -1)");
+        hes[i] = he;
+    }
+    auto cmd = std::make_unique<gomo::ExtrudeEdgesCommand>(std::move(hes));
     auto *raw = cmd.get();
     _history.execute(_mesh, std::move(cmd));
     PackedInt32Array out;
-    for (int32_t v : raw->new_vertex_indices()) out.push_back(v);
+    for (int32_t i : raw->new_edge_indices()) out.push_back(i);
     return out;
 }
 
-PackedInt32Array HalfEdgeMesh::extrude_face(int32_t face_idx) {
-    ERR_FAIL_INDEX_V(face_idx, _mesh.face_count(), PackedInt32Array());
-    auto  cmd = std::make_unique<gomo::ExtrudeFaceCommand>(face_idx);
+PackedInt32Array HalfEdgeMesh::extrude_faces(PackedInt32Array face_indices) {
+    int32_t n = face_indices.size();
+    std::vector<int32_t> fis(n);
+    for (int32_t i = 0; i < n; ++i) {
+        int32_t fi = face_indices[i];
+        ERR_FAIL_INDEX_V(fi, _mesh.face_count(), PackedInt32Array());
+        fis[i] = fi;
+    }
+    auto cmd = std::make_unique<gomo::ExtrudeFacesCommand>(std::move(fis));
     auto *raw = cmd.get();
     _history.execute(_mesh, std::move(cmd));
     PackedInt32Array out;
-    for (int32_t v : raw->new_vertex_indices()) out.push_back(v);
+    for (int32_t fi : raw->result_face_indices()) out.push_back(fi);
     return out;
 }
 
@@ -213,64 +256,6 @@ void HalfEdgeMesh::record_move_vertices(PackedInt32Array indices,
     }
     _history.record(std::make_unique<gomo::MoveVerticesCommand>(
         std::move(idx), std::move(old_pos), std::move(new_pos)));
-}
-
-// --- Sculpting ---
-void HalfEdgeMesh::paint_at(Vector3 hit_pos, float strength, float world_radius) {
-    gomo::paint_at(_mesh, hit_pos, strength, world_radius);
-}
-
-void HalfEdgeMesh::flatten_at(Vector3 hit_pos, float strength, float world_radius) {
-    gomo::flatten_at(_mesh, hit_pos, strength, world_radius);
-}
-
-void HalfEdgeMesh::begin_tilt_stroke() {
-    _pending_tilt_stroke = std::make_unique<gomo::TiltStrokeCommand>();
-    _pending_tilt_stroke->capture_before(_mesh);
-}
-
-void HalfEdgeMesh::end_tilt_stroke() {
-    if (!_pending_tilt_stroke) return;
-    _pending_tilt_stroke->capture_after(_mesh);
-    _history.record(std::move(_pending_tilt_stroke));
-}
-
-void HalfEdgeMesh::restore_tilt_to_stroke_base() {
-    if (_pending_tilt_stroke)
-        _pending_tilt_stroke->restore_before(_mesh);
-}
-
-Ref<Image> HalfEdgeMesh::get_face_normal_map(int32_t face_idx) const {
-    ERR_FAIL_INDEX_V(face_idx, _mesh.face_count(), Ref<Image>());
-    const int S = gomo::Face::HF_SIZE;
-
-    gomo::FaceFrame f   = gomo::compute_face_frame(_mesh, face_idx);
-    Vector3         geo = gomo::get_face_normal(_mesh, face_idx);
-
-    const auto &tilt = _mesh.faces[face_idx].tilt;
-    PackedByteArray data;
-    data.resize(S * S * 4);
-    uint8_t *ptr = data.ptrw();
-
-    auto enc = [](float v) -> uint8_t {
-        return (uint8_t)std::max(0, std::min(255, (int)((v * 0.5f + 0.5f) * 255.0f)));
-    };
-
-    for (int y = 0; y < S; ++y) {
-        for (int x = 0; x < S; ++x) {
-            float tu = tilt[(y * S + x) * 2 + 0];
-            float tv = tilt[(y * S + x) * 2 + 1];
-            float tz = std::sqrt(std::max(0.0f, 1.0f - tu * tu - tv * tv));
-            Vector3 world_n = (geo * tz + f.tangent * tu + f.bitangent * tv).normalized();
-            int i = (y * S + x) * 4;
-            ptr[i + 0] = enc(world_n.x);
-            ptr[i + 1] = enc(world_n.y);
-            ptr[i + 2] = enc(world_n.z);
-            ptr[i + 3] = 255;
-        }
-    }
-
-    return Image::create_from_data(S, S, false, Image::FORMAT_RGBA8, data);
 }
 
 // --- UV unwrapping ---
@@ -323,6 +308,12 @@ Ref<ArrayMesh> HalfEdgeMesh::subdivide_to_mesh(int32_t levels) const {
     return gomo::subdivide_to_mesh(_mesh, levels);
 }
 
+// --- Normal map baking ---
+
+Ref<Image> HalfEdgeMesh::bake_normal_map(int32_t subdiv_levels, int32_t resolution) const {
+    return gomo::bake_normal_map(_mesh, subdiv_levels, resolution);
+}
+
 // --- Undo / redo ---
 
 bool HalfEdgeMesh::undo() { return _history.undo(_mesh); }
@@ -358,17 +349,12 @@ void HalfEdgeMesh::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_face_normal",         "face_idx"), &HalfEdgeMesh::get_face_normal);
     ClassDB::bind_method(D_METHOD("get_face_vertex_indices", "face_idx"), &HalfEdgeMesh::get_face_vertex_indices);
     ClassDB::bind_method(D_METHOD("pick_face", "ray_from", "ray_dir"),    &HalfEdgeMesh::pick_face);
-    ClassDB::bind_method(D_METHOD("extrude_edge", "half_edge_index"),     &HalfEdgeMesh::extrude_edge);
-    ClassDB::bind_method(D_METHOD("extrude_face", "face_idx"),            &HalfEdgeMesh::extrude_face);
+    ClassDB::bind_method(D_METHOD("extrude_edges", "half_edges"),          &HalfEdgeMesh::extrude_edges);
+    ClassDB::bind_method(D_METHOD("extrude_faces", "face_indices"),        &HalfEdgeMesh::extrude_faces);
     ClassDB::bind_method(D_METHOD("delete_face",  "face_idx"),            &HalfEdgeMesh::delete_face);
     ClassDB::bind_method(D_METHOD("record_move_vertices", "indices", "old_positions"), &HalfEdgeMesh::record_move_vertices);
-    ClassDB::bind_method(D_METHOD("paint_at",   "hit_pos", "strength", "world_radius"), &HalfEdgeMesh::paint_at);
-    ClassDB::bind_method(D_METHOD("flatten_at", "hit_pos", "strength", "world_radius"), &HalfEdgeMesh::flatten_at);
-    ClassDB::bind_method(D_METHOD("begin_tilt_stroke"),                   &HalfEdgeMesh::begin_tilt_stroke);
-    ClassDB::bind_method(D_METHOD("end_tilt_stroke"),                     &HalfEdgeMesh::end_tilt_stroke);
-    ClassDB::bind_method(D_METHOD("restore_tilt_to_stroke_base"),         &HalfEdgeMesh::restore_tilt_to_stroke_base);
-    ClassDB::bind_method(D_METHOD("get_face_normal_map", "face_idx"),     &HalfEdgeMesh::get_face_normal_map);
     ClassDB::bind_method(D_METHOD("subdivide_to_mesh", "levels"), &HalfEdgeMesh::subdivide_to_mesh);
+    ClassDB::bind_method(D_METHOD("bake_normal_map", "subdiv_levels", "resolution"), &HalfEdgeMesh::bake_normal_map);
     ClassDB::bind_method(D_METHOD("unwrap_uvs"),                                    &HalfEdgeMesh::unwrap_uvs);
     ClassDB::bind_method(D_METHOD("set_seam", "half_edge_index", "is_seam"),        &HalfEdgeMesh::set_seam);
     ClassDB::bind_method(D_METHOD("get_seam", "half_edge_index"),                   &HalfEdgeMesh::get_seam);

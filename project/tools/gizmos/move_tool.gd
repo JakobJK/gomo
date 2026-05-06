@@ -1,4 +1,4 @@
-extends ModellingTool
+extends ViewportController
 class_name MoveTool
 
 const _AXIS_X  := 0
@@ -62,7 +62,7 @@ func handle_input(event: InputEvent, hem: HalfEdgeMesh, camera: Camera3D) -> boo
 				_drag_initial_pos.push_back(hem.get_vertex_position(i))
 			_active_part   = _hovered_part
 			_drag_centroid = _gizmo_centroid
-			_begin_drag(event.position, camera)
+			_begin_drag(_subvp_mouse(camera), camera)
 			_is_dragging = true
 			return true
 		else:
@@ -73,7 +73,7 @@ func handle_input(event: InputEvent, hem: HalfEdgeMesh, camera: Camera3D) -> boo
 			return false
 
 	if event is InputEventMouseMotion and _is_dragging:
-		_continue_drag(event.position, hem, camera)
+		_continue_drag(_subvp_mouse(camera), hem, camera)
 		return true
 
 	return false
@@ -272,29 +272,3 @@ func _plane_normal(part: int) -> Vector3:
 		_AXIS_YZ: return Vector3(1, 0, 0)
 	return Vector3.UP
 
-func _moveable_vertices(hem: HalfEdgeMesh) -> PackedInt32Array:
-	var verts := PackedInt32Array()
-	if current_mode == 0:  # OBJECT - move all vertices together
-		for i in hem.get_vertex_count():
-			verts.push_back(i)
-	elif current_mode == 1:  # VERTEX
-		return selected_vertices.duplicate()
-	elif current_mode == 2:  # EDGE
-		for he in selected_edges:
-			var v0: int = hem.get_half_edge_vertex(he)
-			var v1: int = hem.get_half_edge_vertex(hem.get_half_edge_next(he))
-			if v0 not in verts: verts.push_back(v0)
-			if v1 not in verts: verts.push_back(v1)
-	elif current_mode == 3:  # FACE
-		for fi in selected_faces:
-			if not hem.is_face_valid(fi): continue
-			for v in hem.get_face_vertex_indices(fi):
-				if v not in verts: verts.push_back(v)
-	return verts
-
-func _dist_sq_seg(p: Vector2, a: Vector2, b: Vector2) -> float:
-	var ab:     Vector2 = b - a
-	var len_sq: float   = ab.length_squared()
-	if len_sq < 0.0001: return p.distance_squared_to(a)
-	var t: float = clampf((p - a).dot(ab) / len_sq, 0.0, 1.0)
-	return p.distance_squared_to(a + ab * t)

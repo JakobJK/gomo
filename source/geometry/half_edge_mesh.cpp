@@ -37,8 +37,28 @@ void HalfEdgeMesh::delete_face(int32_t face_idx) {
 
         half_edges[h].face = -1;
     }
-
     faces[face_idx].half_edge = -1;
 }
 
 } // namespace gomo
+
+
+// std::vector<int32_t> HalfEdgeMesh::get_edges_from_vertex_id(int32_t vertex_idx){
+//     if (vertex_idx < 0 || vertex_idx >= (int32_t)vertices.size()) return {};
+//     int32_t initial_half_edge = vertices[vertex_idx].half_edge 
+
+//     if initial_half_edge == -1:
+//         return {};
+
+//     std::vector<int32_t> result;
+//     current_edge_idx = vertices[vertex_idx].half_edge
+//     do {
+//         current_edge = half_edge[current_edge_idx]
+//         int32_t edge_id = current_edge.twin < current_edge_idx ? current_edge.twin : current_edge_idx
+//         result.push_back(edge_id)
+        
+//         current_edge = current_edge.twin.next
+//     } while (current_edge != vertices[vertex_idx].half_edge)
+
+//     return result;
+// }
