@@ -51,7 +51,25 @@ flat = true
 toggle_mode = true
 flat = true
 
+[node name="AddSeparator" type="VSeparator" parent="ToolbarContent" unique_id=1022022022]
+
+[node name="AddBoxButton" type="Button" parent="ToolbarContent" unique_id=1023023023]
+flat = true
+
+[node name="AddCylinderButton" type="Button" parent="ToolbarContent" unique_id=1025025025]
+flat = true
+
+[node name="DeleteObjectButton" type="Button" parent="ToolbarContent" unique_id=1024024024]
+flat = true
+
 [node name="BakeSeparator" type="VSeparator" parent="ToolbarContent" unique_id=1015015015]
+
+[node name="BakeSubdivSpin" type="SpinBox" parent="ToolbarContent" unique_id=1017017017]
+min_value = 1
+max_value = 12
+value = 2
+suffix = "subdiv"
+custom_minimum_size = Vector2(110, 0)
 
 [node name="BakeNormalMapButton" type="Button" parent="ToolbarContent" unique_id=1016016016]
 flat = true

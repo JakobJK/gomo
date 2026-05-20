@@ -3,6 +3,7 @@
 #include "../geometry/mesh_ops.h"
 #include "../geometry/mesh_commands.h"
 #include "../geometry/create/box.h"
+#include "../geometry/create/cylinder.h"
 #include "../geometry/subdivide.h"
 #include "../geometry/bake.h"
 #include "../geometry/uv_unwrap.h"
@@ -37,29 +38,65 @@ void HalfEdgeMesh::build_sphere(int32_t lat_segments, int32_t lon_segments) {
     _uvs_valid = false;
 }
 
+void HalfEdgeMesh::build_cylinder(int32_t sides, float radius, float height) {
+    gomo::build_cylinder(_mesh, sides, radius, height);
+    _history.clear();
+    _uvs_valid = false;
+}
+
 // --- Conversion ---
 Ref<ArrayMesh> HalfEdgeMesh::to_array_mesh() const {
     Ref<ArrayMesh> mesh;
     mesh.instantiate();
 
+    // Area-weighted smooth vertex normals
+    std::vector<Vector3> vert_norm(_mesh.vertex_count(), Vector3(0, 0, 0));
+    for (int32_t fi = 0; fi < _mesh.face_count(); ++fi) {
+        if (_mesh.faces[fi].half_edge == -1) continue;
+        std::vector<int32_t> fv_idx;
+        int32_t he = _mesh.faces[fi].half_edge;
+        do {
+            fv_idx.push_back(_mesh.half_edges[he].vertex);
+            he = _mesh.half_edges[he].next;
+        } while (he != _mesh.faces[fi].half_edge);
+        for (int i = 1; i + 1 < (int)fv_idx.size(); ++i) {
+            Vector3 e1 = _mesh.vertices[fv_idx[i]].position   - _mesh.vertices[fv_idx[0]].position;
+            Vector3 e2 = _mesh.vertices[fv_idx[i+1]].position - _mesh.vertices[fv_idx[0]].position;
+            Vector3 wN = e1.cross(e2);
+            vert_norm[fv_idx[0]]   += wN;
+            vert_norm[fv_idx[i]]   += wN;
+            vert_norm[fv_idx[i+1]] += wN;
+        }
+    }
+    for (auto &n : vert_norm) {
+        float len = n.length();
+        n = (len > 1e-10f) ? n / len : Vector3(0, 1, 0);
+    }
+
     for (int32_t fi = 0; fi < _mesh.face_count(); ++fi) {
         if (_mesh.faces[fi].half_edge == -1) continue;
 
-        // Collect half-edges and positions in face order
+        // Collect half-edges, positions, and UVs in face order
         std::vector<int32_t> fhe;
         std::vector<Vector3> fv;
+        std::vector<Vector2> fv_uv;
         int32_t he = _mesh.faces[fi].half_edge;
         do {
             fhe.push_back(he);
-            fv.push_back(_mesh.vertices[_mesh.half_edges[he].vertex].position);
+            int32_t vi = _mesh.half_edges[he].vertex;
+            fv.push_back(_mesh.vertices[vi].position);
+            fv_uv.push_back(_mesh.half_edges[he].uv);
             he = _mesh.half_edges[he].next;
         } while (he != _mesh.faces[fi].half_edge);
         if ((int)fv.size() < 3) continue;
 
-        Vector3 geo_norm  = gomo::get_face_normal(_mesh, fi);
-        // Geometry tangent used only for UV fallback projection
+        Vector3 geo_norm = gomo::get_face_normal(_mesh, fi);
         Vector3 geom_tan = (fv[1] - fv[0]).normalized();
         Vector3 geom_bit = geo_norm.cross(geom_tan).normalized();
+
+        // Geometric tangent for this face: first edge projected off face normal
+        Vector3 T_face = (fv[1] - fv[0]);
+        T_face = (T_face - geo_norm * geo_norm.dot(T_face)).normalized();
 
         Vector3 uv_origin;
         float   uv_width = 0.0f, uv_height = 0.0f;
@@ -89,32 +126,21 @@ Ref<ArrayMesh> HalfEdgeMesh::to_array_mesh() const {
             return {u, v};
         };
 
-        auto add_vert = [&](int corner, const Vector3 &T, float tw) {
+        auto add_vert = [&](int corner) {
+            int32_t vi = _mesh.half_edges[fhe[corner]].vertex;
+            const Vector3 &N = vert_norm[vi];
+            Vector3 T = T_face - N * N.dot(T_face);
+            float tlen = T.length();
+            T = (tlen > 1e-10f) ? T / tlen : N.cross(Vector3(0, 1, 0)).normalized();
             verts.push_back(fv[corner]);
-            norms.push_back(geo_norm);
+            norms.push_back(N);
             uvs.push_back(get_uv(corner));
-            tans.push_back(T.x); tans.push_back(T.y); tans.push_back(T.z); tans.push_back(tw);
+            tans.push_back(T.x); tans.push_back(T.y); tans.push_back(T.z); tans.push_back(1.0f);
         };
-
-        // Compute one tangent for the whole face so every fan triangle shares the same frame.
-        Vector3 T = geom_tan;
-        float   tw = 1.0f;
-        {
-            Vector2 uv0 = get_uv(0), uv1 = get_uv(1), uv2 = get_uv((int)fv.size() - 1);
-            Vector3 dP1 = fv[1] - fv[0], dP2 = fv[(int)fv.size() - 1] - fv[0];
-            Vector2 dUV1 = uv1 - uv0, dUV2 = uv2 - uv0;
-            float det = dUV1.x * dUV2.y - dUV2.x * dUV1.y;
-            if (std::abs(det) > 1e-10f) {
-                float r = 1.0f / det;
-                T  = (dP1 * dUV2.y - dP2 * dUV1.y) * r;
-                T  = (T - geo_norm * geo_norm.dot(T)).normalized();
-                tw = (det > 0.0f) ? 1.0f : -1.0f;
-            }
-        }
 
         for (int i = 1; i + 1 < (int)fv.size(); ++i) {
             int c0 = 0, c1 = i + 1, c2 = i;
-            add_vert(c0, T, tw); add_vert(c1, T, tw); add_vert(c2, T, tw);
+            add_vert(c0); add_vert(c1); add_vert(c2);
         }
 
         Array arrays;
@@ -277,6 +303,19 @@ bool HalfEdgeMesh::get_seam(int32_t he_idx) const {
     return _mesh.half_edges[he_idx].seam;
 }
 
+void HalfEdgeMesh::set_crease(int32_t he_idx, float weight) {
+    ERR_FAIL_INDEX(he_idx, _mesh.half_edge_count());
+    _mesh.half_edges[he_idx].crease = weight;
+    int32_t twin = _mesh.half_edges[he_idx].twin;
+    if (twin != -1) _mesh.half_edges[twin].crease = weight;
+}
+
+float HalfEdgeMesh::get_crease(int32_t he_idx) const {
+    ERR_FAIL_INDEX_V(he_idx, _mesh.half_edge_count(), 0.0f);
+    return _mesh.half_edges[he_idx].crease;
+}
+
+
 PackedVector2Array HalfEdgeMesh::get_uv_edges() const {
     PackedVector2Array result;
     for (int32_t hi = 0; hi < _mesh.half_edge_count(); ++hi) {
@@ -285,6 +324,33 @@ PackedVector2Array HalfEdgeMesh::get_uv_edges() const {
         // Each half-edge gives one directed UV edge; draw all so seam boundaries appear on both sides
         result.push_back(he.uv);
         result.push_back(_mesh.half_edges[he.next].uv);
+    }
+    return result;
+}
+
+PackedVector2Array HalfEdgeMesh::get_uv_seam_edges() const {
+    PackedVector2Array result;
+    for (int32_t hi = 0; hi < _mesh.half_edge_count(); ++hi) {
+        const auto &he = _mesh.half_edges[hi];
+        if (he.face == -1 || !he.seam) continue;
+        result.push_back(he.uv);
+        result.push_back(_mesh.half_edges[he.next].uv);
+    }
+    return result;
+}
+
+Array HalfEdgeMesh::get_uv_face_polygons() const {
+    Array result;
+    for (int32_t fi = 0; fi < (int32_t)_mesh.faces.size(); ++fi) {
+        int32_t start = _mesh.faces[fi].half_edge;
+        if (start == -1) continue;
+        PackedVector2Array poly;
+        int32_t cur = start;
+        do {
+            poly.push_back(_mesh.half_edges[cur].uv);
+            cur = _mesh.half_edges[cur].next;
+        } while (cur != start);
+        result.append(poly);
     }
     return result;
 }
@@ -333,6 +399,7 @@ void HalfEdgeMesh::_bind_methods() {
     ClassDB::bind_method(D_METHOD("build_from_triangles", "positions"), &HalfEdgeMesh::build_from_triangles);
     ClassDB::bind_method(D_METHOD("build_box", "width", "height", "depth", "width_segments", "height_segments", "depth_segments"), &HalfEdgeMesh::build_box);
     ClassDB::bind_method(D_METHOD("build_sphere", "lat_segments", "lon_segments"), &HalfEdgeMesh::build_sphere);
+    ClassDB::bind_method(D_METHOD("build_cylinder", "sides", "radius", "height"), &HalfEdgeMesh::build_cylinder);
     ClassDB::bind_method(D_METHOD("to_array_mesh"),                     &HalfEdgeMesh::to_array_mesh);
     ClassDB::bind_method(D_METHOD("get_vertex_count"),                  &HalfEdgeMesh::get_vertex_count);
     ClassDB::bind_method(D_METHOD("get_edge_count"),                    &HalfEdgeMesh::get_edge_count);
@@ -358,7 +425,11 @@ void HalfEdgeMesh::_bind_methods() {
     ClassDB::bind_method(D_METHOD("unwrap_uvs"),                                    &HalfEdgeMesh::unwrap_uvs);
     ClassDB::bind_method(D_METHOD("set_seam", "half_edge_index", "is_seam"),        &HalfEdgeMesh::set_seam);
     ClassDB::bind_method(D_METHOD("get_seam", "half_edge_index"),                   &HalfEdgeMesh::get_seam);
+    ClassDB::bind_method(D_METHOD("set_crease", "half_edge_index", "weight"),       &HalfEdgeMesh::set_crease);
+    ClassDB::bind_method(D_METHOD("get_crease", "half_edge_index"),                 &HalfEdgeMesh::get_crease);
     ClassDB::bind_method(D_METHOD("get_uv_edges"),                                  &HalfEdgeMesh::get_uv_edges);
+    ClassDB::bind_method(D_METHOD("get_uv_seam_edges"),                             &HalfEdgeMesh::get_uv_seam_edges);
+    ClassDB::bind_method(D_METHOD("get_uv_face_polygons"),                          &HalfEdgeMesh::get_uv_face_polygons);
     ClassDB::bind_method(D_METHOD("translate_uvs", "positions", "delta", "epsilon"), &HalfEdgeMesh::translate_uvs);
     ClassDB::bind_method(D_METHOD("undo"),      &HalfEdgeMesh::undo);
     ClassDB::bind_method(D_METHOD("redo"),      &HalfEdgeMesh::redo);

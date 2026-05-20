@@ -10,7 +10,11 @@ extends HBoxContainer
 @onready var _btn_shaded:        Button = $ShadedButton
 @onready var _btn_wireframe:     Button = $WireframeButton
 @onready var _btn_wire_on_shade: Button = $WireOnShadedButton
-@onready var _btn_bake:          Button = $BakeNormalMapButton
+@onready var _btn_add_box:        Button       = $AddBoxButton
+@onready var _btn_add_cylinder:   Button       = $AddCylinderButton
+@onready var _btn_delete:         Button       = $DeleteObjectButton
+@onready var _spin_subdiv:        SpinBox      = $BakeSubdivSpin
+@onready var _btn_bake:           Button       = $BakeNormalMapButton
 
 var _mode_group   := ButtonGroup.new()
 var _render_group := ButtonGroup.new()
@@ -57,6 +61,22 @@ func _ready() -> void:
 	_btn_wire_on_shade.icon        = _load_icon("res://icons/layers.svg")
 	_btn_wire_on_shade.tooltip_text = "Wireframe on Shaded"
 
+	_btn_add_box.icon         = _load_icon("res://icons/box.svg")
+	_btn_add_box.tooltip_text = "Add Box"
+	_btn_add_box.flat         = true
+	_btn_add_box.pressed.connect(func(): EventBus.instance.request_add_box.emit())
+
+	_btn_add_cylinder.icon         = _load_icon("res://icons/circle.svg")
+	_btn_add_cylinder.tooltip_text = "Add Cylinder"
+	_btn_add_cylinder.flat         = true
+	_btn_add_cylinder.pressed.connect(func(): EventBus.instance.request_add_cylinder.emit())
+
+	_btn_delete.icon         = _load_icon("res://icons/trash-2.svg")
+	_btn_delete.tooltip_text = "Delete  Del"
+	_btn_delete.flat         = true
+	_btn_delete.disabled     = true
+	_btn_delete.pressed.connect(func(): EventBus.instance.request_delete_selected.emit())
+
 	_btn_bake.icon         = _load_icon("res://icons/image.svg")
 	_btn_bake.tooltip_text = "Bake Normal Map"
 	_btn_bake.pressed.connect(_on_bake_pressed)
@@ -73,6 +93,7 @@ func _ready() -> void:
 	EventBus.instance.tool_changed.connect(_on_tool_changed)
 	EventBus.instance.mode_changed.connect(_on_mode_changed)
 	EventBus.instance.render_mode_changed.connect(_on_render_mode_changed)
+	EventBus.instance.selection_changed.connect(_on_selection_changed)
 
 	_on_mode_changed(GomoMesh.Mode.OBJECT)
 	_on_render_mode_changed(SelectionState.RENDER_SHADED)
@@ -95,9 +116,9 @@ func _on_render_mode_changed(mode: int) -> void:
 		btns[i].modulate = Color(1.0, 0.6, 0.1) if i == mode else Color.WHITE
 
 func _on_tool_changed(tool: ViewportController) -> void:
-	_btn_move.modulate   = Color(1.0, 0.6, 0.1) if tool is MoveTool   else Color.WHITE
-	_btn_rotate.modulate = Color(1.0, 0.6, 0.1) if tool is RotateTool else Color.WHITE
-	_btn_scale.modulate  = Color(1.0, 0.6, 0.1) if tool is ScaleTool  else Color.WHITE
+	_btn_move.modulate    = Color(1.0, 0.6, 0.1) if tool is MoveTool    else Color.WHITE
+	_btn_rotate.modulate  = Color(1.0, 0.6, 0.1) if tool is RotateTool  else Color.WHITE
+	_btn_scale.modulate   = Color(1.0, 0.6, 0.1) if tool is ScaleTool   else Color.WHITE
 
 func _on_mode_pressed(mode: int) -> void:
 	var context := SelectionState.context
@@ -125,9 +146,12 @@ func _on_scale_pressed() -> void:
 	SelectionState.set_tool(SelectionState.scale_tool)
 	for obj in SelectionState.objects: obj.redraw()
 
+func _on_selection_changed(nodes: Array[Node]) -> void:
+	_btn_delete.disabled = nodes.is_empty()
+
 func _on_bake_pressed() -> void:
 	var obj: GomoMesh = SelectionState.context
 	if obj == null and not SelectionState.objects.is_empty():
 		obj = SelectionState.objects[0]
 	if obj == null: return
-	obj.apply_baked_normal_map()
+	obj.apply_baked_normal_map(int(_spin_subdiv.value))

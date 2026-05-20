@@ -11,8 +11,10 @@ var camera: Camera3D     = null
 var _mesh_instance:   MeshInstance3D
 var _overlay:         MeshInstance3D
 var _subdiv_instance: MeshInstance3D
-var _subdiv_levels:   int  = 2
-var _subdiv_visible:  bool = false
+var _subdiv_levels:      int              = 4
+var _subdiv_visible:     bool             = false
+var _normal_map_tex:     ImageTexture     = null
+var _normal_map_visible: bool             = false
 
 var hovered_vertex: int = -1
 var hovered_edge:   int = -1
@@ -27,10 +29,12 @@ var _mat_wire_dim:     StandardMaterial3D
 var _mat_wire_bright:  StandardMaterial3D
 var _mat_wire_sel:     StandardMaterial3D
 var _mat_wire_hover:   StandardMaterial3D
+var _mat_wire_crease:  StandardMaterial3D
 var _mat_wire_object:  StandardMaterial3D
 var _mat_tool_preview: StandardMaterial3D
 
-var _mat_subdiv: StandardMaterial3D
+var _mat_subdiv:    StandardMaterial3D
+var _mat_mesh_nm:   ShaderMaterial
 
 func _ready() -> void:
 	EventBus.instance.render_mode_changed.connect(func(_m): refresh())
@@ -51,6 +55,7 @@ func _ready() -> void:
 	_mat_wire_bright  = _make_wire(Color(0.8,  0.8,  0.8))
 	_mat_wire_sel     = _make_wire(Color(1.0,  0.55, 0.1))
 	_mat_wire_hover   = _make_wire(Color(1.0,  0.9,  0.2))
+	_mat_wire_crease  = _make_wire(Color(0.2,  0.6,  1.0))
 	_mat_wire_object  = _make_wire(Color(1.0,  1.0,  1.0))
 	_mat_tool_preview = StandardMaterial3D.new()
 	_mat_tool_preview.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -75,7 +80,7 @@ func _process(_delta: float) -> void:
 		return
 	var vp_mouse := _subvp_mouse()
 	if mode == Mode.OBJECT:
-		if SelectionState.active_tool != null and SelectionState.has(self):
+		if SelectionState.active_tool != null and SelectionState.context == self:
 			_sync_tool_state()
 			SelectionState.active_tool.handle_hover(vp_mouse, hem, camera)
 			_draw_overlay()
@@ -89,20 +94,37 @@ func _process(_delta: float) -> void:
 
 # --- Public API ---
 
-func apply_baked_normal_map(subdiv_levels: int = 2, resolution: int = 1024) -> void:
+func apply_baked_normal_map(subdiv_levels: int = 2, resolution: int = 2048) -> void:
 	var image := hem.bake_normal_map(subdiv_levels, resolution)
 	if image == null:
 		return
-	var tex := ImageTexture.create_from_image(image)
-	_mat_mesh.normal_enabled   = true
-	_mat_mesh.normal_texture   = tex
-	_mat_subdiv.normal_enabled = true
-	_mat_subdiv.normal_texture = tex
+	_normal_map_tex = ImageTexture.create_from_image(image)
+	var shader := load("res://shaders/object_space_normal.gdshader")
+	_mat_mesh_nm = ShaderMaterial.new()
+	_mat_mesh_nm.shader = shader
+	_mat_mesh_nm.set_shader_parameter("normal_map_tex", _normal_map_tex)
+	_normal_map_visible = true
+	_mesh_instance.material_override = _mat_mesh_nm
 	EventBus.instance.normal_map_baked.emit(image)
 
-func toggle_subdiv_preview(levels: int = 2) -> void:
+func toggle_normal_map() -> void:
+	if _mat_mesh_nm == null:
+		return
+	_normal_map_visible = not _normal_map_visible
+	if _normal_map_visible:
+		_subdiv_visible                   = false
+		_subdiv_instance.visible          = false
+		_mesh_instance.visible            = SelectionState.render_mode != SelectionState.RENDER_WIREFRAME
+		_mesh_instance.material_override  = _mat_mesh_nm
+	else:
+		_mesh_instance.material_override  = null
+
+func toggle_subdiv_preview(levels: int = 4) -> void:
 	_subdiv_visible = not _subdiv_visible
 	_subdiv_levels  = levels
+	if _subdiv_visible:
+		_normal_map_visible      = false
+		_mat_mesh.normal_enabled = false
 	_update_subdiv()
 
 func _update_subdiv() -> void:
@@ -112,7 +134,7 @@ func _update_subdiv() -> void:
 		_mesh_instance.visible   = false
 	else:
 		_subdiv_instance.visible = false
-		_mesh_instance.visible   = true
+		_mesh_instance.visible   = SelectionState.render_mode != SelectionState.RENDER_WIREFRAME
 
 func build_box(width: float = 2.0, height: float = 2.0, depth: float = 2.0,
 			   width_segments: int = 1, height_segments: int = 1, depth_segments: int = 1) -> void:
@@ -121,6 +143,10 @@ func build_box(width: float = 2.0, height: float = 2.0, depth: float = 2.0,
 
 func build_sphere(lat_segments: int = 8, lon_segments: int = 16) -> void:
 	hem.build_sphere(lat_segments, lon_segments)
+	refresh()
+
+func build_cylinder(sides: int = 8, radius: float = 1.0, height: float = 2.0) -> void:
+	hem.build_cylinder(sides, radius, height)
 	refresh()
 
 func set_mode(new_mode: Mode) -> void:
@@ -149,9 +175,8 @@ func ray_hits(ray_from: Vector3, ray_dir: Vector3) -> bool:
 	var local_dir  := global_transform.basis.inverse() * ray_dir
 	return hem.pick_face(local_from, local_dir) != -1
 
-# Called by main. Returns true if event was consumed.
-func handle_input(event: InputEvent) -> bool:
-	# Undo/redo always first
+# Keyboard-only input — called by world._unhandled_input
+func handle_key(event: InputEvent) -> bool:
 	if event.is_action_pressed("redo", false, true):
 		var changed := hem.redo()
 		if changed: _clear_selection(); refresh()
@@ -161,6 +186,22 @@ func handle_input(event: InputEvent) -> bool:
 		if changed: _clear_selection(); refresh()
 		return true
 
+	if mode == Mode.OBJECT: return false
+
+	if event.is_action_pressed("tool_edge_loop", false, true) and mode == Mode.EDGE:
+		set_tool(null if SelectionState.active_tool is EdgeLoopTool else EdgeLoopTool.new())
+		return true
+	if event.is_action_pressed("tool_crease", false, true) and mode == Mode.EDGE:
+		set_tool(null if SelectionState.active_tool is CreaseTool else CreaseTool.new())
+		return true
+
+	if event.is_action_pressed("op_extrude", false, true): return _do_extrude()
+	if event.is_action_pressed("op_delete",  false, true): return _do_delete()
+
+	return false
+
+# Mouse input for active tool gizmos — called by world.handle_tool_mouse
+func handle_tool_mouse(event: InputEvent) -> bool:
 	if mode == Mode.OBJECT:
 		if not SelectionState.has(self): return false
 		if SelectionState.active_tool != null:
@@ -170,40 +211,11 @@ func handle_input(event: InputEvent) -> bool:
 				return true
 		return false
 
-	# Tool switching
-	if event.is_action_pressed("tool_none", false, true):
-		set_tool(null)
-		return true
-	if event.is_action_pressed("tool_move", false, true):
-		set_tool(SelectionState.move_tool)
-		return true
-	if event.is_action_pressed("tool_rotate", false, true):
-		set_tool(SelectionState.rotate_tool)
-		return true
-	if event.is_action_pressed("tool_scale", false, true):
-		set_tool(SelectionState.scale_tool)
-		return true
-	if event.is_action_pressed("tool_edge_loop", false, true) and mode == Mode.EDGE:
-		set_tool(null if SelectionState.active_tool is EdgeLoopTool else EdgeLoopTool.new())
-		return true
-
-	# Delegate to active tool
 	if SelectionState.active_tool != null:
 		_sync_tool_state()
 		if SelectionState.active_tool.handle_input(event, hem, camera):
 			refresh()
 			return true
-
-	# Operations
-	if event.is_action_pressed("op_extrude", false, true): return _do_extrude()
-	if event.is_action_pressed("op_delete",  false, true): return _do_delete()
-
-	# Selection
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-		if Input.is_key_pressed(Keymap.CAMERA_MODIFIER):
-			return false
-		_handle_selection_click(_subvp_mouse(), event.shift_pressed)
-		return true
 
 	return false
 
@@ -222,8 +234,6 @@ func _do_extrude() -> bool:
 			SelectionState.clear_components()
 			for i in new_edges:
 				SelectionState.add_edge(i)
-			if not SelectionState.active_tool is MoveTool:
-				set_tool(SelectionState.move_tool)
 			_sync_tool_state()
 			refresh()
 			return true
@@ -233,8 +243,6 @@ func _do_extrude() -> bool:
 			SelectionState.clear_components()
 			for fi in new_faces:
 				SelectionState.add_face(fi)
-			if not SelectionState.active_tool is MoveTool:
-				set_tool(SelectionState.move_tool)
 			_sync_tool_state()
 			refresh()
 			return true
@@ -250,7 +258,40 @@ func _do_delete() -> bool:
 		return true
 	return false
 
+
 # --- Selection ---
+func click_select(pos: Vector2, additive: bool) -> void:
+	_handle_selection_click(pos, additive)
+
+func marquee_select(rect: Rect2, additive: bool) -> void:
+	if camera == null: return
+	if not additive:
+		SelectionState.clear_components()
+	match mode:
+		Mode.VERTEX:
+			for i in hem.get_vertex_count():
+				var sp := camera.unproject_position(global_transform * hem.get_vertex_position(i))
+				if rect.has_point(sp):
+					SelectionState.add_vertex(i)
+		Mode.EDGE:
+			for i in hem.get_edge_count():
+				var twin: int = hem.get_half_edge_twin(i)
+				if twin == -1 and hem.get_half_edge_face(i) == -1: continue
+				if twin != -1 and i > twin: continue
+				var canonical := mini(i, twin) if twin != -1 else i
+				var p0 := global_transform * hem.get_vertex_position(hem.get_half_edge_vertex(i))
+				var p1 := global_transform * hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(i)))
+				if rect.has_point(camera.unproject_position(p0)) and rect.has_point(camera.unproject_position(p1)):
+					SelectionState.add_edge(canonical)
+		Mode.FACE:
+			for fi in hem.get_face_count():
+				if not hem.is_face_valid(fi): continue
+				var sp := camera.unproject_position(global_transform * hem.get_face_center(fi))
+				if rect.has_point(sp):
+					SelectionState.add_face(fi)
+	if SelectionState.active_tool != null:
+		_sync_tool_state()
+	_draw_overlay()
 
 func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
 	match mode:
@@ -296,6 +337,7 @@ func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
 	if SelectionState.active_tool != null:
 		_sync_tool_state()
 	_draw_overlay()
+
 
 func _sync_tool_state() -> void:
 	if SelectionState.active_tool == null: return
@@ -364,12 +406,13 @@ func _draw_overlay() -> void:
 					im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(i))))
 				im.surface_end()
 				var is_selected := SelectionState.has(self)
-				if is_selected:
+				var is_context  := SelectionState.context == self
+				if is_context:
 					_ov_tool_preview(im)
 				_overlay.mesh = im
 				var wire_mat := _mat_wire_object if is_selected else _mat_wire_dim
 				_overlay.set_surface_override_material(0, wire_mat)
-				if is_selected:
+				if is_context:
 					_overlay.set_surface_override_material(1, _mat_tool_preview)
 					_overlay.set_surface_override_material(2, _mat_tool_preview)
 			else:
@@ -400,7 +443,7 @@ func _draw_overlay() -> void:
 			_overlay.set_surface_override_material(5, _mat_tool_preview)
 
 		Mode.EDGE:
-			# surf 0: unselected non-hovered edges
+			# surf 0: unselected, non-creased, non-hovered edges
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
 			var drew := false
 			for i in hem.get_edge_count():
@@ -410,12 +453,29 @@ func _draw_overlay() -> void:
 				var canonical := mini(i, twin) if twin != -1 else i
 				if canonical in SelectionState.edges: continue
 				if i == hovered_edge or twin == hovered_edge: continue
+				if hem.get_crease(i) > 0.0: continue
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(i)))
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(i))))
 				drew = true
 			if not drew: _dummy(im)
 			im.surface_end()
-			# surf 1: selected edges
+			# surf 1: unselected, creased, non-hovered edges
+			im.surface_begin(Mesh.PRIMITIVE_LINES)
+			drew = false
+			for i in hem.get_edge_count():
+				var twin: int = hem.get_half_edge_twin(i)
+				if twin == -1 and hem.get_half_edge_face(i) == -1: continue
+				if twin != -1 and i > twin: continue
+				var canonical := mini(i, twin) if twin != -1 else i
+				if canonical in SelectionState.edges: continue
+				if i == hovered_edge or twin == hovered_edge: continue
+				if hem.get_crease(i) <= 0.0: continue
+				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(i)))
+				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hem.get_half_edge_next(i))))
+				drew = true
+			if not drew: _dummy(im)
+			im.surface_end()
+			# surf 2: selected edges
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
 			drew = false
 			for he in SelectionState.edges:
@@ -424,7 +484,7 @@ func _draw_overlay() -> void:
 				drew = true
 			if not drew: _dummy(im)
 			im.surface_end()
-			# surf 2: hovered edge
+			# surf 3: hovered edge
 			im.surface_begin(Mesh.PRIMITIVE_LINES)
 			if hovered_edge != -1 and hovered_edge not in SelectionState.edges:
 				im.surface_add_vertex(hem.get_vertex_position(hem.get_half_edge_vertex(hovered_edge)))
@@ -432,14 +492,15 @@ func _draw_overlay() -> void:
 			else:
 				_dummy(im)
 			im.surface_end()
-			# surf 3-4: tool preview (lines + triangles)
+			# surf 4-5: tool preview (lines + triangles)
 			_ov_tool_preview(im)
 			_overlay.mesh = im
 			_overlay.set_surface_override_material(0, _mat_wire_dim)
-			_overlay.set_surface_override_material(1, _mat_wire_sel)
-			_overlay.set_surface_override_material(2, _mat_wire_hover)
-			_overlay.set_surface_override_material(3, _mat_tool_preview)
+			_overlay.set_surface_override_material(1, _mat_wire_crease)
+			_overlay.set_surface_override_material(2, _mat_wire_sel)
+			_overlay.set_surface_override_material(3, _mat_wire_hover)
 			_overlay.set_surface_override_material(4, _mat_tool_preview)
+			_overlay.set_surface_override_material(5, _mat_tool_preview)
 
 		Mode.FACE:
 			# surf 0: all edges dim

@@ -6,10 +6,10 @@ extends Camera3D
 @export var min_distance := 0.5
 @export var max_distance := 100.0
 
-var _pivot       := Vector3.ZERO
-var _distance    := 4.0
-var _yaw         := 0.0
-var _pitch       := 0.3
+var _pivot    := Vector3.ZERO
+var _distance := 4.0
+var _yaw      := 0.0
+var _pitch    := 0.3
 
 enum Mode { NONE, ORBIT, PAN }
 var _mode := Mode.NONE
@@ -17,33 +17,31 @@ var _mode := Mode.NONE
 func _ready() -> void:
 	_apply_transform()
 
-func _unhandled_input(event: InputEvent) -> void:
+func handle_mouse(event: InputEvent) -> bool:
 	if event is InputEventMouseButton:
 		var mod := Input.is_key_pressed(Keymap.CAMERA_MODIFIER)
 		match event.button_index:
 			Keymap.CAMERA_ORBIT_BTN:
 				_mode = Mode.ORBIT if (mod and event.pressed) else Mode.NONE
-				if mod and event.pressed:
-					get_viewport().set_input_as_handled()
+				if mod and event.pressed: return true
 			Keymap.CAMERA_PAN_BTN:
 				_mode = Mode.PAN if (mod and event.pressed) else Mode.NONE
-				if mod and event.pressed:
-					get_viewport().set_input_as_handled()
+				if mod and event.pressed: return true
 			Keymap.CAMERA_DOLLY_BTN:
 				_mode = Mode.NONE
 		if event.is_action_pressed("cam_zoom_in"):
 			_distance = clampf(_distance - zoom_speed * _distance * 0.3, min_distance, max_distance)
 			_apply_transform()
-			get_viewport().set_input_as_handled()
+			return true
 		elif event.is_action_pressed("cam_zoom_out"):
 			_distance = clampf(_distance + zoom_speed * _distance * 0.3, min_distance, max_distance)
 			_apply_transform()
-			get_viewport().set_input_as_handled()
+			return true
 
 	elif event is InputEventMouseMotion:
 		if not Input.is_key_pressed(Keymap.CAMERA_MODIFIER):
 			_mode = Mode.NONE
-			return
+			return false
 
 		match _mode:
 			Mode.ORBIT:
@@ -51,21 +49,23 @@ func _unhandled_input(event: InputEvent) -> void:
 				_pitch += event.relative.y * orbit_speed
 				_pitch  = clampf(_pitch, -PI * 0.49, PI * 0.49)
 				_apply_transform()
-				get_viewport().set_input_as_handled()
+				return true
 			Mode.PAN:
 				var right := global_basis.x
 				var up    := global_basis.y
 				_pivot -= right * event.relative.x * pan_speed * _distance
 				_pivot += up    * event.relative.y * pan_speed * _distance
 				_apply_transform()
-				get_viewport().set_input_as_handled()
+				return true
 
 		if Input.is_mouse_button_pressed(Keymap.CAMERA_DOLLY_BTN):
 			var delta: float = event.relative.x - event.relative.y
 			_distance = clampf(_distance - delta * zoom_speed * 0.01 * _distance,
 								min_distance, max_distance)
 			_apply_transform()
-			get_viewport().set_input_as_handled()
+			return true
+
+	return false
 
 func _apply_transform() -> void:
 	var offset := Vector3(

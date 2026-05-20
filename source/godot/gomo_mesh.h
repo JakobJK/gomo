@@ -21,6 +21,7 @@ public:
     void build_box(float width = 2.0f, float height = 2.0f, float depth = 2.0f,
                    int32_t width_segments = 1, int32_t height_segments = 1, int32_t depth_segments = 1);
     void build_sphere(int32_t lat_segments = 8, int32_t lon_segments = 16);
+    void build_cylinder(int32_t sides = 8, float radius = 1.0f, float height = 2.0f);
 
     // Conversion
     godot::Ref<godot::ArrayMesh> to_array_mesh() const;
@@ -67,7 +68,14 @@ public:
     void                      unwrap_uvs();
     void                      set_seam(int32_t half_edge_index, bool is_seam);
     bool                      get_seam(int32_t half_edge_index) const;
+
+    // Creases
+    void  set_crease(int32_t half_edge_index, float weight);
+    float get_crease(int32_t half_edge_index) const;
+
     godot::PackedVector2Array get_uv_edges() const;
+    godot::PackedVector2Array get_uv_seam_edges() const;
+    godot::Array              get_uv_face_polygons() const;
     void                      translate_uvs(godot::PackedVector2Array positions, godot::Vector2 delta, float epsilon);
 
     // Undo / redo

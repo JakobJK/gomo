@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://b0ii128sfqcx3" path="res://ui/views/viewport.gd" id="1"]
 [ext_resource type="Script" uid="uid://cdm4dwja20m0j" path="res://ui/views/camera_controller.gd" id="2"]
+[ext_resource type="Script" path="res://ui/views/viewport_input.gd" id="3"]
 
 [node name="viewport" type="Control" unique_id=1896986236]
 layout_mode = 3
@@ -32,6 +33,7 @@ text = "Toggle UV Shading"
 layout_mode = 2
 size_flags_vertical = 3
 stretch = true
+script = ExtResource("3")
 
 [node name="SubViewport" type="SubViewport" parent="VBoxContainer/SubViewport" unique_id=1902480695]
 handle_input_locally = false

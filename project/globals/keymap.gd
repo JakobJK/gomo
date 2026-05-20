@@ -9,19 +9,23 @@ const CAMERA_DOLLY_BTN := MOUSE_BUTTON_RIGHT
 
 static func setup() -> void:
 	# Modes
-	_key("mode_object",    KEY_1)
-	_key("mode_vertex",    KEY_2)
-	_key("mode_edge",      KEY_3)
-	_key("mode_face",      KEY_4)
+	_key("mode_vertex",       KEY_2)
+	_key("mode_edge",         KEY_3)
+	_key("mode_face",         KEY_4)
+	# Normal map preview
+	_key("toggle_normal_map", KEY_1)
 	# Tools
 	_key("tool_none",      KEY_Q)
 	_key("tool_move",      KEY_W)
 	_key("tool_rotate",    KEY_E)
 	_key("tool_scale",     KEY_R)
 	_key("tool_edge_loop", KEY_R, true)
+	_key("tool_crease",    KEY_C)
 	# Mesh operations
 	_key("op_extrude",     KEY_E, true)
 	_key("op_delete",      KEY_X)
+	# Object operations
+	_key("delete_object",  KEY_DELETE)
 	# Subdivision preview
 	_key("toggle_subdiv",  KEY_QUOTELEFT)
 	# History

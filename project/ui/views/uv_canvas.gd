@@ -1,6 +1,8 @@
 extends Control
 
-var edges: PackedVector2Array = []
+var edges:         PackedVector2Array = []
+var seam_edges:    PackedVector2Array = []
+var face_polygons: Array             = []  # Array of PackedVector2Array
 var gomo_mesh = null  # GomoMesh
 var _background: ImageTexture = null
 var last_baked_image: Image    = null
@@ -85,7 +87,9 @@ func _on_uv_drag(screen_pos: Vector2) -> void:
 	gomo_mesh.hem.translate_uvs(_selected_uvs, delta_uv, 0.0001)
 	for i in _selected_uvs.size():
 		_selected_uvs[i] += delta_uv
-	edges = gomo_mesh.hem.get_uv_edges()
+	edges         = gomo_mesh.hem.get_uv_edges()
+	seam_edges    = gomo_mesh.hem.get_uv_seam_edges()
+	face_polygons = gomo_mesh.hem.get_uv_face_polygons()
 	_prev_drag_screen = screen_pos
 	queue_redraw()
 	gomo_mesh.refresh()
@@ -121,15 +125,36 @@ func _ready() -> void:
 		queue_redraw()
 	)
 
+static func _signed_area(poly: PackedVector2Array) -> float:
+	var area := 0.0
+	var n := poly.size()
+	for i in n:
+		var a := poly[i]
+		var b := poly[(i + 1) % n]
+		area += a.x * b.y - b.x * a.y
+	return area * 0.5
+
 func _draw() -> void:
 	draw_rect(Rect2(_pan, Vector2(_zoom, _zoom)), Color(0.12, 0.12, 0.12, 1.0))
 	if _background != null:
 		draw_texture_rect(_background, Rect2(_pan, Vector2(_zoom, _zoom)), false)
+	for poly in face_polygons:
+		var screen_poly := PackedVector2Array()
+		for uv in poly:
+			screen_poly.append(_uv_to_screen(uv))
+		var col := Color(0.25, 0.45, 1.0, 0.18) if _signed_area(poly) > 0.0 \
+				else Color(1.0, 0.25, 0.25, 0.18)
+		draw_colored_polygon(screen_poly, col)
+	var col := Color(0.8, 0.8, 0.8, 1.0)
 	if not edges.is_empty():
-		var col := Color(0.8, 0.8, 0.8, 1.0)
 		var i := 0
 		while i + 1 < edges.size():
-			draw_line(_uv_to_screen(edges[i]), _uv_to_screen(edges[i + 1]), col, 1.0, true)
+			draw_line(_uv_to_screen(edges[i]), _uv_to_screen(edges[i + 1]), col, 0.5, true)
+			i += 2
+	if not seam_edges.is_empty():
+		var i := 0
+		while i + 1 < seam_edges.size():
+			draw_line(_uv_to_screen(seam_edges[i]), _uv_to_screen(seam_edges[i + 1]), col, 1.0, true)
 			i += 2
 	for uv in _selected_uvs:
 		var sc := _uv_to_screen(uv)

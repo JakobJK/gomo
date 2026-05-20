@@ -21,6 +21,16 @@ layout_mode = 2
 text = "Unwrap"
 flat = true
 
+[node name="MarkSeamButton" type="Button" parent="VBox/uv_tools" unique_id=1000001007]
+layout_mode = 2
+text = "Mark Seam"
+flat = true
+
+[node name="MergeSeamButton" type="Button" parent="VBox/uv_tools" unique_id=1000001008]
+layout_mode = 2
+text = "Merge Seam"
+flat = true
+
 [node name="SaveNormalMapButton" type="Button" parent="VBox/uv_tools" unique_id=1000001005]
 layout_mode = 2
 text = "Save Normal Map"

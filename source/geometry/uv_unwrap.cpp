@@ -5,6 +5,7 @@
 #include <eigen3/Eigen/SparseQR>
 #include <queue>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <cmath>
 #include <algorithm>
@@ -53,28 +54,82 @@ std::vector<std::vector<int32_t>> find_islands(const HalfEdgeMesh &mesh) {
 }
 
 struct TriInfo {
-    int32_t vi[3]; // local vertex indices
-    int32_t he[3]; // half-edge index per corner (unused in solver, used for UV write-back)
+    int32_t vi[3];
+    int32_t he[3];
 };
 
 void lscm_island(HalfEdgeMesh &mesh, const std::vector<int32_t> &island_faces) {
     using SpMat   = Eigen::SparseMatrix<double>;
     using Triplet = Eigen::Triplet<double>;
 
-    // --- Collect local vertex set and triangulate faces ---
-    std::unordered_map<int32_t, int32_t> vert_to_local;
-    std::vector<int32_t> local_verts;
+    // --- Collect all half-edges in this island ---
+    std::unordered_set<int32_t> island_he_set;
+    for (int32_t fi : island_faces) {
+        int32_t he = mesh.faces[fi].half_edge;
+        do {
+            island_he_set.insert(he);
+            he = mesh.half_edges[he].next;
+        } while (he != mesh.faces[fi].half_edge);
+    }
+
+    // --- UV vertex splitting ---
+    // he.vertex is the SOURCE of the half-edge (start vertex, not destination).
+    // Half-edges starting at V share a UV vertex iff connected around V without crossing a seam.
+    //
+    // Forward:  from h (source=V), cross edge h → nxt = h.twin.next (source=V in adj face).
+    //           Stop if h.seam.
+    // Backward: from h (source=V), cross h.prev → prev_h = h.prev.twin (source=V in prev face).
+    //           Stop if h.prev.seam.
+
+    std::unordered_map<int32_t, int32_t> he_to_uv;
+    std::vector<int32_t> uv_to_vert;
+
+    for (int32_t start_he : island_he_set) {
+        if (he_to_uv.count(start_he)) continue;
+
+        int32_t V = mesh.half_edges[start_he].vertex;
+        int32_t uv_idx = (int32_t)uv_to_vert.size();
+        uv_to_vert.push_back(V);
+        he_to_uv[start_he] = uv_idx;
+
+        // Forward: h -> h.twin.next -> ...
+        {
+            int32_t h = start_he;
+            while (true) {
+                if (mesh.half_edges[h].seam) break;
+                int32_t tw = mesh.half_edges[h].twin;
+                if (tw == -1) break;
+                int32_t nxt = mesh.half_edges[tw].next;
+                if (!island_he_set.count(nxt) || he_to_uv.count(nxt)) break;
+                he_to_uv[nxt] = uv_idx;
+                h = nxt;
+            }
+        }
+
+        // Backward: h -> h.prev.twin -> ...
+        {
+            int32_t h = start_he;
+            while (true) {
+                int32_t prev = mesh.half_edges[h].prev;
+                if (mesh.half_edges[prev].seam) break;
+                int32_t prev_tw = mesh.half_edges[prev].twin;
+                if (prev_tw == -1) break;
+                if (!island_he_set.count(prev_tw) || he_to_uv.count(prev_tw)) break;
+                he_to_uv[prev_tw] = uv_idx;
+                h = prev_tw;
+            }
+        }
+    }
+
+    // --- Triangulate faces ---
     std::vector<TriInfo> tris;
 
     for (int32_t fi : island_faces) {
         std::vector<int32_t> fhe, fvi;
         int32_t he = mesh.faces[fi].half_edge;
         do {
-            int32_t v = mesh.half_edges[he].vertex;
-            auto [it, inserted] = vert_to_local.try_emplace(v, (int32_t)local_verts.size());
-            if (inserted) local_verts.push_back(v);
             fhe.push_back(he);
-            fvi.push_back(it->second);
+            fvi.push_back(he_to_uv[he]);
             he = mesh.half_edges[he].next;
         } while (he != mesh.faces[fi].half_edge);
 
@@ -87,19 +142,19 @@ void lscm_island(HalfEdgeMesh &mesh, const std::vector<int32_t> &island_faces) {
         }
     }
 
-    int32_t n = (int32_t)local_verts.size();
+    int32_t n = (int32_t)uv_to_vert.size();
     if (n < 2 || tris.empty()) return;
 
     // --- Choose pin vertices: farthest pair via two-pass diameter approx ---
     int32_t pin_a = 0, pin_b = 1;
     {
         auto farthest_from = [&](int32_t src) -> int32_t {
-            const Vector3 &ps = mesh.vertices[local_verts[src]].position;
+            const Vector3 &ps = mesh.vertices[uv_to_vert[src]].position;
             int32_t best = (src == 0) ? 1 : 0;
-            float best_d = (mesh.vertices[local_verts[best]].position - ps).length_squared();
+            float best_d = (mesh.vertices[uv_to_vert[best]].position - ps).length_squared();
             for (int32_t i = 0; i < n; ++i) {
                 if (i == src) continue;
-                float d = (mesh.vertices[local_verts[i]].position - ps).length_squared();
+                float d = (mesh.vertices[uv_to_vert[i]].position - ps).length_squared();
                 if (d > best_d) { best_d = d; best = i; }
             }
             return best;
@@ -118,17 +173,15 @@ void lscm_island(HalfEdgeMesh &mesh, const std::vector<int32_t> &island_faces) {
     }
     int32_t nf = (int32_t)free_list.size();
 
-    // Pin UVs: pin_a at (0,0), pin_b at (1,0)
     std::vector<double> pin_u(n, 0.0), pin_v(n, 0.0);
     pin_u[pin_b] = 1.0;
 
-    // --- Degenerate: only 2 vertices ---
     if (nf == 0) {
         for (int32_t fi : island_faces) {
             int32_t he = mesh.faces[fi].half_edge;
             do {
-                int32_t loc = vert_to_local[mesh.half_edges[he].vertex];
-                mesh.half_edges[he].uv = {(float)pin_u[loc], (float)pin_v[loc]};
+                int32_t uvi = he_to_uv[he];
+                mesh.half_edges[he].uv = {(float)pin_u[uvi], (float)pin_v[uvi]};
                 he = mesh.half_edges[he].next;
             } while (he != mesh.faces[fi].half_edge);
         }
@@ -136,12 +189,6 @@ void lscm_island(HalfEdgeMesh &mesh, const std::vector<int32_t> &island_faces) {
     }
 
     // --- Build LSCM sparse system: 2 rows per triangle ---
-    // Variables: [u_0..u_{nf-1}, v_0..v_{nf-1}]
-    // For triangle (A,B,C) in local 2D frame qa=(0,0), qb=(s,0), qc=(p,q):
-    //   Eq1 (real): q*uA + (p-s)*vA - q*uB - p*vB + s*vC = 0
-    //   Eq2 (imag): (s-p)*uA + q*vA + p*uB - q*vB - s*uC = 0
-    // Pinned vertices move to the RHS.
-
     int32_t n_rows = (int32_t)tris.size() * 2;
     int32_t n_cols = nf * 2;
 
@@ -153,11 +200,10 @@ void lscm_island(HalfEdgeMesh &mesh, const std::vector<int32_t> &island_faces) {
     for (int32_t ti = 0; ti < (int32_t)tris.size(); ++ti) {
         int ia = tris[ti].vi[0], ib = tris[ti].vi[1], ic = tris[ti].vi[2];
 
-        Vector3 Pa = mesh.vertices[local_verts[ia]].position;
-        Vector3 Pb = mesh.vertices[local_verts[ib]].position;
-        Vector3 Pc = mesh.vertices[local_verts[ic]].position;
+        Vector3 Pa = mesh.vertices[uv_to_vert[ia]].position;
+        Vector3 Pb = mesh.vertices[uv_to_vert[ib]].position;
+        Vector3 Pc = mesh.vertices[uv_to_vert[ic]].position;
 
-        // Project to local 2D frame
         Vector3 AB  = Pb - Pa;
         float   s   = AB.length();
         if (s < 1e-8f) continue;
@@ -169,12 +215,11 @@ void lscm_island(HalfEdgeMesh &mesh, const std::vector<int32_t> &island_faces) {
 
         float p    = (Pc - Pa).dot(e1);
         float q    = (Pc - Pa).dot(e2);
-        float area = 0.5f * s * q; // signed; negative means reversed winding
+        float area = 0.5f * s * q;
         if (std::abs(area) < 1e-10f) continue;
 
         double w = 1.0 / std::sqrt(std::abs((double)area));
 
-        // Coefficients: {local_vertex_idx, coeff_u, coeff_v}
         struct C { int vi; double cu, cv; };
         C eq1[3] = {{ia, q,   p-s}, {ib, -q,  -p}, {ic,  0,   s}};
         C eq2[3] = {{ia, s-p, q  }, {ib,  p,  -q}, {ic, -s,   0}};
@@ -217,12 +262,12 @@ void lscm_island(HalfEdgeMesh &mesh, const std::vector<int32_t> &island_faces) {
         V[free_list[i]] = x[i + nf];
     }
 
-    // --- Write UVs to every half-edge corner in the island ---
+    // --- Write UVs ---
     for (int32_t fi : island_faces) {
         int32_t he = mesh.faces[fi].half_edge;
         do {
-            int32_t loc = vert_to_local[mesh.half_edges[he].vertex];
-            mesh.half_edges[he].uv = {(float)U[loc], (float)V[loc]};
+            int32_t uvi = he_to_uv[he];
+            mesh.half_edges[he].uv = {(float)U[uvi], (float)V[uvi]};
             he = mesh.half_edges[he].next;
         } while (he != mesh.faces[fi].half_edge);
     }
@@ -248,14 +293,12 @@ void pack_islands(HalfEdgeMesh &mesh, const std::vector<std::vector<int32_t>> &i
     }
     if (bbs.empty()) return;
 
-    // Sort tallest first for shelf packing
     std::sort(bbs.begin(), bbs.end(), [](const BB &a, const BB &b) {
         return (a.mx_v - a.mn_v) > (b.mx_v - b.mn_v);
     });
 
     const float pad = 0.005f;
 
-    // Estimate square side from total area
     float total_area = 0;
     for (auto &bb : bbs)
         total_area += (bb.mx_u - bb.mn_u + pad) * (bb.mx_v - bb.mn_v + pad);
@@ -277,7 +320,6 @@ void pack_islands(HalfEdgeMesh &mesh, const std::vector<std::vector<int32_t>> &i
     float norm = std::max(side, total_h);
     if (norm < 1e-8f) return;
 
-    // Apply placements: translate each island and normalize to [0,1]
     for (auto &pl : placements) {
         for (int32_t fi : islands[pl.idx]) {
             int32_t he = mesh.faces[fi].half_edge;
@@ -291,8 +333,7 @@ void pack_islands(HalfEdgeMesh &mesh, const std::vector<std::vector<int32_t>> &i
     }
 }
 
-// Auto-mark seams where adjacent faces meet at a sharp angle (cos < threshold).
-// cos(60°)=0.5 catches all 90° box edges while leaving coplanar triangle pairs unseamed.
+// Additive only — never clears user-marked seams.
 static void mark_angle_seams(HalfEdgeMesh &mesh, float cos_threshold = 0.5f) {
     auto face_normal = [&](int32_t fi) -> Vector3 {
         int32_t h0 = mesh.faces[fi].half_edge;
@@ -312,8 +353,10 @@ static void mark_angle_seams(HalfEdgeMesh &mesh, float cos_threshold = 0.5f) {
         if (twin < 0 || twin <= i) continue;
         if (he.face < 0 || mesh.half_edges[twin].face < 0) continue;
         bool sharp = face_normal(he.face).dot(face_normal(mesh.half_edges[twin].face)) < cos_threshold;
-        he.seam                      = sharp;
-        mesh.half_edges[twin].seam   = sharp;
+        if (sharp) {
+            he.seam                    = true;
+            mesh.half_edges[twin].seam = true;
+        }
     }
 }
 

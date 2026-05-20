@@ -37,7 +37,7 @@ struct UV {
 } // anonymous namespace
 
 Ref<ArrayMesh> subdivide_to_mesh(const HalfEdgeMesh &mesh, int levels, bool bilinear_uvs) {
-    levels = std::max(1, std::min(levels, 5));
+    levels = std::max(1, std::min(levels, 12));
 
     // --- Collect face-vertex topology and face-varying UVs in one pass ---
     std::vector<int> verts_per_face;
@@ -90,18 +90,35 @@ Ref<ArrayMesh> subdivide_to_mesh(const HalfEdgeMesh &mesh, int levels, bool bili
 
     if (verts_per_face.empty()) return Ref<ArrayMesh>();
 
+    // --- Collect crease data ---
+    std::vector<int>   crease_pairs;
+    std::vector<float> crease_weights;
+    for (int32_t hi = 0; hi < mesh.half_edge_count(); ++hi) {
+        const auto &he = mesh.half_edges[hi];
+        if (he.face == -1) continue;
+        int32_t twin = he.twin;
+        if (twin >= 0 && hi > twin) continue;
+        if (he.crease <= 0.0f) continue;
+        crease_pairs.push_back(he.vertex);
+        crease_pairs.push_back(mesh.half_edges[he.next].vertex);
+        crease_weights.push_back(he.crease);
+    }
+
     // --- Build TopologyDescriptor with UV face-varying channel ---
     Far::TopologyDescriptor::FVarChannel fv_channel;
     fv_channel.numValues    = (int)fv_values.size();
     fv_channel.valueIndices = fv_indices.data();
 
     Far::TopologyDescriptor desc;
-    desc.numVertices        = mesh.vertex_count();
-    desc.numFaces           = (int)verts_per_face.size();
-    desc.numVertsPerFace    = verts_per_face.data();
-    desc.vertIndicesPerFace = face_vert_indices.data();
-    desc.numFVarChannels    = 1;
-    desc.fvarChannels       = &fv_channel;
+    desc.numVertices            = mesh.vertex_count();
+    desc.numFaces               = (int)verts_per_face.size();
+    desc.numVertsPerFace        = verts_per_face.data();
+    desc.vertIndicesPerFace     = face_vert_indices.data();
+    desc.numFVarChannels        = 1;
+    desc.fvarChannels           = &fv_channel;
+    desc.numCreases             = (int)crease_weights.size();
+    desc.creaseVertexIndexPairs = crease_pairs.empty()   ? nullptr : crease_pairs.data();
+    desc.creaseWeights          = crease_weights.empty() ? nullptr : crease_weights.data();
 
     Sdc::Options sdc_opts;
     sdc_opts.SetVtxBoundaryInterpolation(Sdc::Options::VTX_BOUNDARY_EDGE_ONLY);
