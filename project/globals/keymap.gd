@@ -8,12 +8,10 @@ const CAMERA_PAN_BTN   := MOUSE_BUTTON_MIDDLE
 const CAMERA_DOLLY_BTN := MOUSE_BUTTON_RIGHT
 
 static func setup() -> void:
-	# Modes
-	_key("mode_vertex",       KEY_2)
-	_key("mode_edge",         KEY_3)
-	_key("mode_face",         KEY_4)
-	# Normal map preview
-	_key("toggle_normal_map", KEY_1)
+	# Display modes
+	_key("display_base",       KEY_QUOTELEFT)
+	_key("display_subdiv",     KEY_1)
+	_key("display_normal_map", KEY_2)
 	# Tools
 	_key("tool_none",      KEY_Q)
 	_key("tool_move",      KEY_W)
@@ -26,8 +24,6 @@ static func setup() -> void:
 	_key("op_delete",      KEY_X)
 	# Object operations
 	_key("delete_object",  KEY_DELETE)
-	# Subdivision preview
-	_key("toggle_subdiv",  KEY_QUOTELEFT)
 	# History
 	_key("undo",           KEY_Z, true)
 	_key("redo",           KEY_Z, true, true)

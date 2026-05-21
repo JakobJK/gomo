@@ -19,16 +19,16 @@ static func _ensure_ready() -> void:
 	if _ready:
 		return
 	_ready = true
-	_reg("mesh",   "Mesh",   "res://icons/box.svg",    func(n): return n is GomoMesh)
-	_reg("camera", "Camera", "res://icons/camera.svg",  func(n): return n is Camera3D)
+	_reg("mesh",   "Mesh",   "res://ui/icons/box.svg",    func(n): return n is GomoMesh)
+	_reg("camera", "Camera", "res://ui/icons/camera.svg",  func(n): return n is Camera3D)
 
 static func _reg(id: String, name: String, icon_path: String, check: Callable) -> void:
-	var d       := TypeDef.new()
-	d.id          = id
+	var d         := TypeDef.new()
+	d.id           = id
 	d.display_name = name
-	d.icon        = _load_icon(icon_path)
-	d.check       = check
-	d.attributes  = []
+	d.icon         = _load_icon(icon_path)
+	d.check        = check
+	d.attributes   = []
 	_types.append(d)
 
 static func _load_icon(path: String) -> ImageTexture:

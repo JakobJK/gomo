@@ -32,7 +32,6 @@ func on_activate() -> void:
 func on_deactivate() -> void:
 	pass
 
-# --- Shared helpers ---
 
 func _moveable_vertices(hem: HalfEdgeMesh) -> PackedInt32Array:
 	var verts := PackedInt32Array()

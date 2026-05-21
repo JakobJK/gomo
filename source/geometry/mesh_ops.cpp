@@ -21,17 +21,6 @@ struct Vector3Hash {
     }
 };
 
-struct EdgeKey {
-    int32_t a, b;
-    bool operator==(const EdgeKey &o) const { return a == o.a && b == o.b; }
-};
-
-struct EdgeKeyHash {
-    size_t operator()(const EdgeKey &k) const {
-        return std::hash<int64_t>()(((int64_t)k.a << 32) | (uint32_t)k.b);
-    }
-};
-
 } // anonymous namespace
 
 

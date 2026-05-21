@@ -3,6 +3,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <cstdint>
+#include <functional>
 
 namespace gomo {
 
@@ -25,6 +26,17 @@ struct HalfEdge {
 
 struct Face {
     int32_t half_edge = -1;
+};
+
+struct EdgeKey {
+    int32_t a, b;
+    bool operator==(const EdgeKey &o) const { return a == o.a && b == o.b; }
+};
+
+struct EdgeKeyHash {
+    size_t operator()(const EdgeKey &k) const {
+        return std::hash<int64_t>()(((int64_t)k.a << 32) | (uint32_t)k.b);
+    }
 };
 
 } // namespace gomo

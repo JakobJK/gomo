@@ -156,7 +156,6 @@ Ref<ArrayMesh> HalfEdgeMesh::to_array_mesh() const {
 }
 
 // --- Counts ---
-
 int32_t HalfEdgeMesh::get_vertex_count() const { return _mesh.vertex_count(); }
 int32_t HalfEdgeMesh::get_edge_count()   const { return _mesh.half_edge_count(); }
 int32_t HalfEdgeMesh::get_face_count()   const { return _mesh.face_count(); }
@@ -355,6 +354,29 @@ Array HalfEdgeMesh::get_uv_face_polygons() const {
     return result;
 }
 
+Array HalfEdgeMesh::get_uv_verts() const {
+    PackedInt32Array indices;
+    PackedVector2Array uvs;
+    for (int32_t hi = 0; hi < _mesh.half_edge_count(); ++hi) {
+        const auto &he = _mesh.half_edges[hi];
+        if (he.face == -1) continue;
+        indices.push_back(hi);
+        uvs.push_back(he.uv);
+    }
+    Array result;
+    result.push_back(indices);
+    result.push_back(uvs);
+    return result;
+}
+
+void HalfEdgeMesh::set_uvs(PackedInt32Array indices, PackedVector2Array uvs) {
+    for (int i = 0; i < indices.size(); ++i) {
+        int32_t hi = indices[i];
+        if (hi >= 0 && hi < (int32_t)_mesh.half_edges.size())
+            _mesh.half_edges[hi].uv = uvs[i];
+    }
+}
+
 void HalfEdgeMesh::translate_uvs(PackedVector2Array positions, Vector2 delta, float epsilon) {
     float eps_sq = epsilon * epsilon;
     for (auto &he : _mesh.half_edges) {
@@ -431,6 +453,8 @@ void HalfEdgeMesh::_bind_methods() {
     ClassDB::bind_method(D_METHOD("get_uv_seam_edges"),                             &HalfEdgeMesh::get_uv_seam_edges);
     ClassDB::bind_method(D_METHOD("get_uv_face_polygons"),                          &HalfEdgeMesh::get_uv_face_polygons);
     ClassDB::bind_method(D_METHOD("translate_uvs", "positions", "delta", "epsilon"), &HalfEdgeMesh::translate_uvs);
+    ClassDB::bind_method(D_METHOD("get_uv_verts"),                                  &HalfEdgeMesh::get_uv_verts);
+    ClassDB::bind_method(D_METHOD("set_uvs", "indices", "uvs"),                     &HalfEdgeMesh::set_uvs);
     ClassDB::bind_method(D_METHOD("undo"),      &HalfEdgeMesh::undo);
     ClassDB::bind_method(D_METHOD("redo"),      &HalfEdgeMesh::redo);
     ClassDB::bind_method(D_METHOD("can_undo"),  &HalfEdgeMesh::can_undo);

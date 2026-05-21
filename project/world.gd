@@ -48,6 +48,8 @@ func _ready() -> void:
 	add_child(world_env)
 
 func setup() -> void:
+	EventBus.instance.request_undo.connect(func(): if focused_object: focused_object.do_undo())
+	EventBus.instance.request_redo.connect(func(): if focused_object: focused_object.do_redo())
 	EventBus.instance.request_add_box.connect(_on_add_box)
 	EventBus.instance.request_add_cylinder.connect(_on_add_cylinder)
 	EventBus.instance.request_delete_selected.connect(_on_delete_selected)
@@ -61,13 +63,20 @@ func setup() -> void:
 func handle_tool_mouse(event: InputEvent) -> bool:
 	for obj in mesh_objects:
 		if obj.mode != GomoMesh.Mode.OBJECT:
-			if obj.handle_tool_mouse(event):
+			if SelectionState.active_tool == null: continue
+			obj.sync_tool_state()
+			if SelectionState.active_tool.handle_input(event, obj.hem, obj.camera):
+				obj.refresh()
 				return true
 
 	if focused_object != null and focused_object.mode == GomoMesh.Mode.OBJECT:
+		if SelectionState.active_tool == null or not SelectionState.has(focused_object):
+			return false
 		var tool        := SelectionState.active_tool as MoveTool
 		var was_dragging: bool = tool != null and tool.is_dragging
-		var consumed    := focused_object.handle_tool_mouse(event)
+		focused_object.sync_tool_state()
+		var consumed := SelectionState.active_tool.handle_input(event, focused_object.hem, focused_object.camera)
+		if consumed: focused_object.refresh()
 
 		if tool != null:
 			if not was_dragging and tool.is_dragging:
@@ -191,13 +200,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	if event.is_action_pressed("toggle_subdiv", false, true) and focused_object != null:
-		focused_object.toggle_subdiv_preview()
+	if event.is_action_pressed("display_base", false, true) and focused_object != null:
+		focused_object.set_display_mode(GomoMesh.DisplayMode.BASE)
 		get_viewport().set_input_as_handled()
 		return
 
-	if event.is_action_pressed("toggle_normal_map", false, true) and focused_object != null:
-		focused_object.toggle_normal_map()
+	if event.is_action_pressed("display_subdiv", false, true) and focused_object != null:
+		focused_object.set_display_mode(GomoMesh.DisplayMode.SUBDIVIDED)
+		get_viewport().set_input_as_handled()
+		return
+
+	if event.is_action_pressed("display_normal_map", false, true) and focused_object != null:
+		EventBus.instance.display_normal_map_requested.emit()
 		get_viewport().set_input_as_handled()
 		return
 
@@ -207,17 +221,6 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	# Mode switching
-	if focused_object != null:
-		var mode_key := -1
-		if   event.is_action_pressed("mode_object", false, true): mode_key = GomoMesh.Mode.OBJECT
-		elif event.is_action_pressed("mode_vertex", false, true): mode_key = GomoMesh.Mode.VERTEX
-		elif event.is_action_pressed("mode_edge",   false, true): mode_key = GomoMesh.Mode.EDGE
-		elif event.is_action_pressed("mode_face",   false, true): mode_key = GomoMesh.Mode.FACE
-		if mode_key != -1:
-			focused_object.set_mode(mode_key as GomoMesh.Mode)
-			get_viewport().set_input_as_handled()
-			return
 
 	# Per-object keyboard (undo, ops, specialized tools)
 	for obj in mesh_objects:

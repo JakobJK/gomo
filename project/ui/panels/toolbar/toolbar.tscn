@@ -1,0 +1,99 @@
+[gd_scene format=3 uid="uid://c4vm8bx3kqana"]
+
+[ext_resource type="Script" uid="uid://btb7qn2xr8f4c" path="res://ui/panels/toolbar/toolbar.gd" id="1"]
+
+[node name="ToolbarPanel" type="PanelContainer" unique_id=1001001001]
+
+[node name="ToolbarContent" type="HBoxContainer" parent="." unique_id=1002002002]
+layout_mode = 2
+script = ExtResource("1")
+
+[node name="ObjectModeButton" type="Button" parent="ToolbarContent" unique_id=1004004004]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="VertexModeButton" type="Button" parent="ToolbarContent" unique_id=1005005005]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="EdgeModeButton" type="Button" parent="ToolbarContent" unique_id=1006006006]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="FaceModeButton" type="Button" parent="ToolbarContent" unique_id=1007007007]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="ModeSeparator" type="VSeparator" parent="ToolbarContent" unique_id=1008008008]
+layout_mode = 2
+
+[node name="MoveButton" type="Button" parent="ToolbarContent" unique_id=1003003003]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="RotateButton" type="Button" parent="ToolbarContent" unique_id=1013013013]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="ScaleButton" type="Button" parent="ToolbarContent" unique_id=1014014014]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="ToolSeparator" type="VSeparator" parent="ToolbarContent" unique_id=1009009009]
+layout_mode = 2
+
+[node name="ShadedButton" type="Button" parent="ToolbarContent" unique_id=1010010010]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="WireframeButton" type="Button" parent="ToolbarContent" unique_id=1011011011]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="WireOnShadedButton" type="Button" parent="ToolbarContent" unique_id=1012012012]
+layout_mode = 2
+toggle_mode = true
+flat = true
+
+[node name="AddSeparator" type="VSeparator" parent="ToolbarContent" unique_id=1022022022]
+layout_mode = 2
+
+[node name="AddBoxButton" type="Button" parent="ToolbarContent" unique_id=1023023023]
+layout_mode = 2
+flat = true
+
+[node name="AddCylinderButton" type="Button" parent="ToolbarContent" unique_id=1025025025]
+layout_mode = 2
+flat = true
+
+[node name="DeleteObjectButton" type="Button" parent="ToolbarContent" unique_id=1024024024]
+layout_mode = 2
+flat = true
+
+[node name="BakeSeparator" type="VSeparator" parent="ToolbarContent" unique_id=1015015015]
+layout_mode = 2
+
+[node name="BakeSubdivSpin" type="SpinBox" parent="ToolbarContent" unique_id=1017017017]
+custom_minimum_size = Vector2(110, 0)
+layout_mode = 2
+min_value = 1.0
+max_value = 12.0
+value = 2.0
+suffix = "subdiv"
+
+[node name="BakeNormalMapButton" type="Button" parent="ToolbarContent" unique_id=1016016016]
+layout_mode = 2
+flat = true
+
+[node name="AutoBakeCheck" type="CheckButton" parent="ToolbarContent" unique_id=1018018018]
+layout_mode = 2
+text = "Auto-bake"

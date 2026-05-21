@@ -72,6 +72,7 @@ func _ready() -> void:
 func _make_wire(color: Color) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.cull_mode    = BaseMaterial3D.CULL_DISABLED
 	mat.albedo_color = color
 	return mat
 
@@ -81,12 +82,12 @@ func _process(_delta: float) -> void:
 	var vp_mouse := _subvp_mouse()
 	if mode == Mode.OBJECT:
 		if SelectionState.active_tool != null and SelectionState.context == self:
-			_sync_tool_state()
+			sync_tool_state()
 			SelectionState.active_tool.handle_hover(vp_mouse, hem, camera)
 			_draw_overlay()
 		return
 	if SelectionState.active_tool != null:
-		_sync_tool_state()
+		sync_tool_state()
 		SelectionState.active_tool.handle_hover(vp_mouse, hem, camera)
 	else:
 		_update_hover(vp_mouse)
@@ -103,29 +104,33 @@ func apply_baked_normal_map(subdiv_levels: int = 2, resolution: int = 2048) -> v
 	_mat_mesh_nm = ShaderMaterial.new()
 	_mat_mesh_nm.shader = shader
 	_mat_mesh_nm.set_shader_parameter("normal_map_tex", _normal_map_tex)
-	_normal_map_visible = true
-	_mesh_instance.material_override = _mat_mesh_nm
+	set_display_mode(DisplayMode.NORMAL_MAP)
 	EventBus.instance.normal_map_baked.emit(image)
 
-func toggle_normal_map() -> void:
-	if _mat_mesh_nm == null:
-		return
-	_normal_map_visible = not _normal_map_visible
-	if _normal_map_visible:
-		_subdiv_visible                   = false
-		_subdiv_instance.visible          = false
-		_mesh_instance.visible            = SelectionState.render_mode != SelectionState.RENDER_WIREFRAME
-		_mesh_instance.material_override  = _mat_mesh_nm
-	else:
-		_mesh_instance.material_override  = null
+enum DisplayMode { BASE, SUBDIVIDED, NORMAL_MAP }
+var display_mode: DisplayMode = DisplayMode.BASE
 
-func toggle_subdiv_preview(levels: int = 4) -> void:
-	_subdiv_visible = not _subdiv_visible
+func set_display_mode(dm: DisplayMode, levels: int = 4) -> void:
+	display_mode    = dm
 	_subdiv_levels  = levels
-	if _subdiv_visible:
-		_normal_map_visible      = false
-		_mat_mesh.normal_enabled = false
-	_update_subdiv()
+	_subdiv_visible = dm == DisplayMode.SUBDIVIDED
+	_normal_map_visible = dm == DisplayMode.NORMAL_MAP and _mat_mesh_nm != null
+	match dm:
+		DisplayMode.BASE:
+			_subdiv_instance.visible         = false
+			_mesh_instance.material_override = null
+			_mesh_instance.visible           = SelectionState.render_mode != SelectionState.RENDER_WIREFRAME
+		DisplayMode.SUBDIVIDED:
+			_subdiv_instance.mesh    = hem.subdivide_to_mesh(_subdiv_levels)
+			_subdiv_instance.visible = true
+			_mesh_instance.visible   = false
+			_mesh_instance.material_override = null
+		DisplayMode.NORMAL_MAP:
+			if _mat_mesh_nm == null:
+				return
+			_subdiv_instance.visible         = false
+			_mesh_instance.visible           = SelectionState.render_mode != SelectionState.RENDER_WIREFRAME
+			_mesh_instance.material_override = _mat_mesh_nm
 
 func _update_subdiv() -> void:
 	if _subdiv_visible:
@@ -164,11 +169,17 @@ func set_mode(new_mode: Mode) -> void:
 func set_tool(tool: ViewportController) -> void:
 	SelectionState.set_tool(tool)
 	if SelectionState.active_tool != null:
-		_sync_tool_state()
+		sync_tool_state()
 	_draw_overlay()
 
 func redraw() -> void:
 	_draw_overlay()
+
+func do_undo() -> void:
+	if hem.undo(): _clear_selection(); refresh()
+
+func do_redo() -> void:
+	if hem.redo(): _clear_selection(); refresh()
 
 func ray_hits(ray_from: Vector3, ray_dir: Vector3) -> bool:
 	var local_from := global_transform.affine_inverse() * ray_from
@@ -200,25 +211,6 @@ func handle_key(event: InputEvent) -> bool:
 
 	return false
 
-# Mouse input for active tool gizmos — called by world.handle_tool_mouse
-func handle_tool_mouse(event: InputEvent) -> bool:
-	if mode == Mode.OBJECT:
-		if not SelectionState.has(self): return false
-		if SelectionState.active_tool != null:
-			_sync_tool_state()
-			if SelectionState.active_tool.handle_input(event, hem, camera):
-				refresh()
-				return true
-		return false
-
-	if SelectionState.active_tool != null:
-		_sync_tool_state()
-		if SelectionState.active_tool.handle_input(event, hem, camera):
-			refresh()
-			return true
-
-	return false
-
 # --- Operations ---
 
 func _do_extrude() -> bool:
@@ -234,7 +226,7 @@ func _do_extrude() -> bool:
 			SelectionState.clear_components()
 			for i in new_edges:
 				SelectionState.add_edge(i)
-			_sync_tool_state()
+			sync_tool_state()
 			refresh()
 			return true
 		Mode.FACE:
@@ -243,7 +235,7 @@ func _do_extrude() -> bool:
 			SelectionState.clear_components()
 			for fi in new_faces:
 				SelectionState.add_face(fi)
-			_sync_tool_state()
+			sync_tool_state()
 			refresh()
 			return true
 	return false
@@ -253,7 +245,7 @@ func _do_delete() -> bool:
 		for fi in SelectionState.faces:
 			hem.delete_face(fi)
 		SelectionState.clear_components()
-		_sync_tool_state()
+		sync_tool_state()
 		refresh()
 		return true
 	return false
@@ -290,7 +282,7 @@ func marquee_select(rect: Rect2, additive: bool) -> void:
 				if rect.has_point(sp):
 					SelectionState.add_face(fi)
 	if SelectionState.active_tool != null:
-		_sync_tool_state()
+		sync_tool_state()
 	_draw_overlay()
 
 func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
@@ -335,11 +327,11 @@ func _handle_selection_click(mouse_pos: Vector2, additive: bool) -> void:
 				SelectionState.clear_components()
 
 	if SelectionState.active_tool != null:
-		_sync_tool_state()
+		sync_tool_state()
 	_draw_overlay()
 
 
-func _sync_tool_state() -> void:
+func sync_tool_state() -> void:
 	if SelectionState.active_tool == null: return
 	SelectionState.active_tool.object_transform  = global_transform
 	SelectionState.active_tool.current_mode      = mode
@@ -426,11 +418,11 @@ func _draw_overlay() -> void:
 			# surf 2: selected vertex dots
 			_ov_vertex_dots(im, true)
 			# surf 3: hovered vertex dot
-			im.surface_begin(Mesh.PRIMITIVE_LINES)
+			im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
 			if hovered_vertex != -1 and hovered_vertex not in SelectionState.vertices:
 				_draw_dot(im, hem.get_vertex_position(hovered_vertex))
 			else:
-				_dummy(im)
+				_dummy_tri(im)
 			im.surface_end()
 			# surf 4-5: tool preview (lines + triangles)
 			_ov_tool_preview(im)
@@ -544,26 +536,29 @@ func _ov_all_edges(im: ImmediateMesh) -> void:
 	im.surface_end()
 
 func _ov_vertex_dots(im: ImmediateMesh, only_selected: bool) -> void:
-	im.surface_begin(Mesh.PRIMITIVE_LINES)
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
 	var drew := false
 	for i in hem.get_vertex_count():
 		var is_sel := i in SelectionState.vertices
 		if is_sel != only_selected: continue
 		_draw_dot(im, hem.get_vertex_position(i))
 		drew = true
-	if not drew: _dummy(im)
+	if not drew: _dummy_tri(im)
 	im.surface_end()
 
 func _draw_dot(im: ImmediateMesh, pos: Vector3) -> void:
 	if camera == null: return
 	var cam_local := global_transform.affine_inverse() * camera.global_position
-	var sz    := pos.distance_to(cam_local) * 0.012
+	var sz    := pos.distance_to(cam_local) * Settings.instance.viewport.vertex_dot_size
 	var right := (global_transform.basis.inverse() * camera.global_basis.x).normalized() * sz
 	var up    := (global_transform.basis.inverse() * camera.global_basis.y).normalized() * sz
-	im.surface_add_vertex(pos + up);    im.surface_add_vertex(pos + right)
-	im.surface_add_vertex(pos + right); im.surface_add_vertex(pos - up)
-	im.surface_add_vertex(pos - up);    im.surface_add_vertex(pos - right)
-	im.surface_add_vertex(pos - right); im.surface_add_vertex(pos + up)
+	const SEGS := 10
+	for i in SEGS:
+		var a0 := TAU * i / SEGS
+		var a1 := TAU * (i + 1) / SEGS
+		im.surface_add_vertex(pos)
+		im.surface_add_vertex(pos + right * cos(a0) + up * sin(a0))
+		im.surface_add_vertex(pos + right * cos(a1) + up * sin(a1))
 
 func _ov_tool_preview(im: ImmediateMesh) -> void:
 	if SelectionState.active_tool != null:

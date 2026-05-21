@@ -8,18 +8,6 @@ using namespace godot;
 
 namespace gomo {
 
-namespace {
-struct EdgeKey {
-    int32_t a, b;
-    bool operator==(const EdgeKey &o) const { return a == o.a && b == o.b; }
-};
-struct EdgeKeyHash {
-    size_t operator()(const EdgeKey &k) const {
-        return std::hash<int64_t>()(((int64_t)k.a << 32) | (uint32_t)k.b);
-    }
-};
-} // anonymous namespace
-
 void build_cylinder(HalfEdgeMesh &mesh, int32_t sides, float radius, float height) {
     mesh.clear();
     sides = std::max(3, (int)sides);

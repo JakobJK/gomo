@@ -77,6 +77,8 @@ public:
     godot::PackedVector2Array get_uv_seam_edges() const;
     godot::Array              get_uv_face_polygons() const;
     void                      translate_uvs(godot::PackedVector2Array positions, godot::Vector2 delta, float epsilon);
+    godot::Array              get_uv_verts() const;
+    void                      set_uvs(godot::PackedInt32Array indices, godot::PackedVector2Array uvs);
 
     // Undo / redo
     bool undo();

@@ -2,11 +2,12 @@
 
 [ext_resource type="Script" uid="uid://d33kpkclb10de" path="res://app.gd" id="1"]
 [ext_resource type="PackedScene" uid="uid://dpmlmr2q85uu3" path="res://world.tscn" id="2"]
-[ext_resource type="PackedScene" uid="uid://wyoh3wmjd2gg" path="res://ui/views/viewport.tscn" id="3"]
-[ext_resource type="PackedScene" path="res://ui/panels/scene_panel.tscn" id="4"]
-[ext_resource type="PackedScene" uid="uid://che8b2ivn0i36" path="res://ui/panels/properties_panel.tscn" id="5"]
-[ext_resource type="PackedScene" uid="uid://c4vm8bx3kqana" path="res://ui/toolbar.tscn" id="6"]
-[ext_resource type="PackedScene" uid="uid://cb5og6d5bol2n" path="res://ui/views/uv_view.tscn" id="7"]
+[ext_resource type="PackedScene" uid="uid://wyoh3wmjd2gg" path="res://ui/views/viewport/viewport.tscn" id="3"]
+[ext_resource type="PackedScene" path="res://ui/panels/scene/scene_panel.tscn" id="4"]
+[ext_resource type="PackedScene" uid="uid://che8b2ivn0i36" path="res://ui/panels/properties/properties_panel.tscn" id="5"]
+[ext_resource type="PackedScene" uid="uid://c4vm8bx3kqana" path="res://ui/panels/toolbar/toolbar.tscn" id="6"]
+[ext_resource type="PackedScene" uid="uid://cb5og6d5bol2n" path="res://ui/views/uv_view/uv_view.tscn" id="7"]
+[ext_resource type="Script" uid="uid://bb8om3nqy6cw3" path="res://ui/panels/menu_bar/menu_bar.gd" id="8"]
 
 [sub_resource type="Theme" id="Theme_lquwl"]
 
@@ -31,6 +32,10 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+
+[node name="MenuBar" type="MenuBar" parent="UI/vbox" unique_id=1234000010]
+layout_mode = 2
+script = ExtResource("8")
 
 [node name="ToolbarRow" type="HBoxContainer" parent="UI/vbox" unique_id=1234000001]
 custom_minimum_size = Vector2(0, 20)

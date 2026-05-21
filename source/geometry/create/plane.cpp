@@ -7,6 +7,10 @@ namespace gomo {
 
 void build_plane(HalfEdgeMesh &mesh, float width, float depth, int32_t width_segments, int32_t depth_segments) {
     mesh.clear();
+
+
+    
+    
 }
 
 } // namespace gomo

@@ -12,6 +12,8 @@ public:
     std::vector<Face>     faces;
 
     void clear();
+    void collapse_face(int32_t face_idx);
+    void poke_face(int32_t face_idx);
     void delete_face(int32_t face_idx);
 
     int32_t vertex_count()    const { return static_cast<int32_t>(vertices.size()); }
