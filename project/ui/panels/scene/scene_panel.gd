@@ -20,6 +20,11 @@ var world: Node3D:
 
 func _ready() -> void:
 	_tree.focus_mode = Control.FOCUS_NONE
+	_tree.focus_entered.connect(_tree.release_focus)
+	_tree.gui_input.connect(func(_e): _tree.release_focus())
+	_tree.add_theme_stylebox_override("cursor", StyleBoxEmpty.new())
+	_tree.add_theme_stylebox_override("cursor_unfocused", StyleBoxEmpty.new())
+	_tree.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	_tree.item_selected.connect(_on_item_selected)
 	_tree.multi_selected.connect(func(_i, _c, _s): _on_item_selected())
 	EventBus.instance.selection_changed.connect(sync_selection)
@@ -42,6 +47,7 @@ func sync_selection(nodes: Array[Node]) -> void:
 	_syncing = false
 
 func _on_item_selected() -> void:
+	_tree.release_focus()
 	if _syncing:
 		return
 	var nodes: Array[Node] = []
@@ -57,19 +63,17 @@ func _on_item_selected() -> void:
 func _refresh() -> void:
 	_syncing = true
 	_tree.clear()
+	if world != null:
+		var root := _tree.create_item()
+		for child in world.get_children():
+			if (child is GomoMesh) and not child.is_queued_for_deletion():
+				var item := _tree.create_item(root)
+				var def := TypeRegistry.get_for(child)
+				if def != null:
+					item.set_icon(0, def.icon)
+				item.set_text(0, child.name)
+				item.set_meta("node", child)
 	_syncing = false
-	if world == null:
-		return
-	var root := _tree.create_item()
-	root.set_text(0, "World")
-	for child in world.get_children():
-		if (child is GomoMesh) and not child.is_queued_for_deletion():
-			var item := _tree.create_item(root)
-			var def := TypeRegistry.get_for(child)
-			if def != null:
-				item.set_icon(0, def.icon)
-			item.set_text(0, child.name)
-			item.set_meta("node", child)
 
 func _on_object_changed(obj: Node3D) -> void:
 	var item := _tree.get_root()

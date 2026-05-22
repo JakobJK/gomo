@@ -26,7 +26,7 @@ func _on_unwrap_pressed() -> void:
 func _on_mark_seam_pressed() -> void:
 	if _canvas.gomo_mesh == null:
 		return
-	for he in SelectionState.edges:
+	for he in State.edges:
 		_canvas.gomo_mesh.hem.set_seam(he, true)
 	_canvas.seam_edges = _canvas.gomo_mesh.hem.get_uv_seam_edges()
 	_canvas.queue_redraw()
@@ -34,7 +34,7 @@ func _on_mark_seam_pressed() -> void:
 func _on_merge_seam_pressed() -> void:
 	if _canvas.gomo_mesh == null:
 		return
-	for he in SelectionState.edges:
+	for he in State.edges:
 		_canvas.gomo_mesh.hem.set_seam(he, false)
 	_canvas.seam_edges = _canvas.gomo_mesh.hem.get_uv_seam_edges()
 	_canvas.queue_redraw()

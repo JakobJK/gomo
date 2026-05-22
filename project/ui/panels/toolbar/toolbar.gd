@@ -90,9 +90,9 @@ func _ready() -> void:
 		btn.toggle_mode  = true
 		btn.flat         = true
 
-	_btn_shaded.pressed.connect(func(): _on_render_pressed(SelectionState.RENDER_SHADED))
-	_btn_wireframe.pressed.connect(func(): _on_render_pressed(SelectionState.RENDER_WIREFRAME))
-	_btn_wire_on_shade.pressed.connect(func(): _on_render_pressed(SelectionState.RENDER_WIREFRAME_ON_SHADED))
+	_btn_shaded.pressed.connect(func(): _on_render_pressed(State.RENDER_SHADED))
+	_btn_wireframe.pressed.connect(func(): _on_render_pressed(State.RENDER_WIREFRAME))
+	_btn_wire_on_shade.pressed.connect(func(): _on_render_pressed(State.RENDER_WIREFRAME_ON_SHADED))
 
 	EventBus.instance.tool_changed.connect(_on_tool_changed)
 	EventBus.instance.mode_changed.connect(_on_mode_changed)
@@ -100,7 +100,7 @@ func _ready() -> void:
 	EventBus.instance.selection_changed.connect(_on_selection_changed)
 
 	_on_mode_changed(GomoMesh.Mode.OBJECT)
-	_on_render_mode_changed(SelectionState.RENDER_SHADED)
+	_on_render_mode_changed(State.RENDER_SHADED)
 
 func _load_icon(name: String) -> ImageTexture:
 	var svg := FileAccess.get_file_as_string("res://ui/icons/" + name + ".svg")
@@ -125,38 +125,38 @@ func _on_tool_changed(tool: ViewportController) -> void:
 	_btn_scale.modulate   = Palette.ACTIVE if tool is ScaleTool   else Color.WHITE
 
 func _on_mode_pressed(mode: int) -> void:
-	var context := SelectionState.context
+	var context := State.context
 	if context != null:
 		context.set_mode(mode as GomoMesh.Mode)
 	else:
-		for obj in SelectionState.objects:
+		for obj in State.objects:
 			obj.set_mode(mode as GomoMesh.Mode)
 
 func _on_render_pressed(mode: int) -> void:
-	SelectionState.set_render_mode(mode)
+	State.set_render_mode(mode)
 
 func _on_move_pressed() -> void:
-	if SelectionState.active_tool is MoveTool: return
-	SelectionState.set_tool(SelectionState.move_tool)
-	for obj in SelectionState.objects: obj.redraw()
+	if State.active_tool is MoveTool: return
+	State.set_tool(State.move_tool)
+	for obj in State.objects: obj.redraw()
 
 func _on_rotate_pressed() -> void:
-	if SelectionState.active_tool is RotateTool: return
-	SelectionState.set_tool(SelectionState.rotate_tool)
-	for obj in SelectionState.objects: obj.redraw()
+	if State.active_tool is RotateTool: return
+	State.set_tool(State.rotate_tool)
+	for obj in State.objects: obj.redraw()
 
 func _on_scale_pressed() -> void:
-	if SelectionState.active_tool is ScaleTool: return
-	SelectionState.set_tool(SelectionState.scale_tool)
-	for obj in SelectionState.objects: obj.redraw()
+	if State.active_tool is ScaleTool: return
+	State.set_tool(State.scale_tool)
+	for obj in State.objects: obj.redraw()
 
 func _on_selection_changed(nodes: Array[Node]) -> void:
 	_btn_delete.disabled = nodes.is_empty()
 
 func _on_display_normal_map_requested() -> void:
-	var obj: GomoMesh = SelectionState.context
-	if obj == null and not SelectionState.objects.is_empty():
-		obj = SelectionState.objects[0]
+	var obj: GomoMesh = State.context
+	if obj == null and not State.objects.is_empty():
+		obj = State.objects[0]
 	if obj == null:
 		return
 	if _chk_auto_bake.button_pressed:
@@ -165,8 +165,8 @@ func _on_display_normal_map_requested() -> void:
 		obj.set_display_mode(GomoMesh.DisplayMode.NORMAL_MAP)
 
 func _on_bake_pressed() -> void:
-	var obj: GomoMesh = SelectionState.context
-	if obj == null and not SelectionState.objects.is_empty():
-		obj = SelectionState.objects[0]
+	var obj: GomoMesh = State.context
+	if obj == null and not State.objects.is_empty():
+		obj = State.objects[0]
 	if obj == null: return
 	obj.apply_baked_normal_map(int(_spin_subdiv.value))

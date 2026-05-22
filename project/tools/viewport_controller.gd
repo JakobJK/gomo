@@ -8,6 +8,7 @@ var current_mode:      int              = 0
 var selected_vertices: PackedInt32Array = []
 var selected_edges:    PackedInt32Array = []
 var selected_faces:    PackedInt32Array = []
+var is_dragging:       bool             = false
 
 func handle_hover(mouse_pos: Vector2, _hem: HalfEdgeMesh, _camera: Camera3D) -> void:
 	pass

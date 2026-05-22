@@ -120,7 +120,7 @@ func _gui_input(event: InputEvent) -> void:
 			if _hovered_part != prev: queue_redraw()
 
 func _on_left_press(screen_pos: Vector2, shift: bool) -> void:
-	var tool := SelectionState.active_tool
+	var tool := State.active_tool
 	# Check gizmo first if selection exists and tool active
 	if not _selected_he.is_empty() and tool != null:
 		var part := _gizmo_hit(screen_pos)
@@ -161,7 +161,7 @@ func _on_left_press(screen_pos: Vector2, shift: bool) -> void:
 
 func _on_transform_drag(screen_pos: Vector2) -> void:
 	if gomo_mesh == null or _selected_he.is_empty() or _drag_initial_uvs.is_empty(): return
-	var tool     := SelectionState.active_tool
+	var tool     := State.active_tool
 	var new_uvs  := PackedVector2Array()
 	var centroid := _uv_centroid(_drag_initial_uvs)
 	var start_uv := _screen_to_uv(_left_press_pos)
@@ -241,10 +241,10 @@ func _gizmo_centroid_screen() -> Vector2:
 	return _uv_to_screen(_uv_centroid(_current_selected_uvs()))
 
 func _gizmo_hit(screen_pos: Vector2) -> int:
-	if _selected_he.is_empty() or SelectionState.active_tool == null:
+	if _selected_he.is_empty() or State.active_tool == null:
 		return GizmoPart.NONE
 	var c    := _gizmo_centroid_screen()
-	var tool := SelectionState.active_tool
+	var tool := State.active_tool
 
 	if tool is RotateTool:
 		if absf(screen_pos.distance_to(c) - ROTATE_R) < HIT_R:
@@ -260,7 +260,7 @@ func _gizmo_hit(screen_pos: Vector2) -> int:
 	return GizmoPart.NONE
 
 func _draw_gizmo(c: Vector2) -> void:
-	var tool := SelectionState.active_tool
+	var tool := State.active_tool
 	if tool == null: return
 
 	if tool is RotateTool:

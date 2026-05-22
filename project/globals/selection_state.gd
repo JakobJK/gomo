@@ -1,4 +1,4 @@
-class_name SelectionState
+class_name State
 extends RefCounted
 
 # --- Render Mode ---

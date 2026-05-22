@@ -25,8 +25,8 @@ var _gizmo_centroid:  Vector3  = Vector3.ZERO
 var _hovered_part:    int      = _NONE
 var _active_part:     int      = _NONE
 
-var is_dragging:      bool               = false
-var drag_world_delta: Vector3            = Vector3.ZERO
+var skip_vertex_ops:   bool               = false
+var drag_world_delta:  Vector3            = Vector3.ZERO
 var _drag_indices:     PackedInt32Array   = PackedInt32Array()
 var _drag_initial_pos: PackedVector3Array = PackedVector3Array()
 var _drag_plane:       Plane              = Plane()
@@ -57,10 +57,11 @@ func handle_input(event: InputEvent, hem: HalfEdgeMesh, camera: Camera3D) -> boo
 			var verts := _moveable_vertices(hem)
 			if verts.is_empty():
 				return false
-			_drag_indices = verts
-			_drag_initial_pos.clear()
-			for i in verts:
-				_drag_initial_pos.push_back(hem.get_vertex_position(i))
+			if not skip_vertex_ops:
+				_drag_indices = verts
+				_drag_initial_pos.clear()
+				for i in verts:
+					_drag_initial_pos.push_back(hem.get_vertex_position(i))
 			_active_part   = _hovered_part
 			_drag_centroid = _gizmo_centroid
 			_begin_drag(_subvp_mouse(camera), camera)
@@ -68,7 +69,8 @@ func handle_input(event: InputEvent, hem: HalfEdgeMesh, camera: Camera3D) -> boo
 			return true
 		else:
 			if is_dragging:
-				hem.record_move_vertices(_drag_indices, _drag_initial_pos)
+				if not skip_vertex_ops:
+					hem.record_move_vertices(_drag_indices, _drag_initial_pos)
 				is_dragging = false
 				_active_part = _NONE
 			return false
@@ -256,8 +258,9 @@ func _continue_drag(mouse_pos: Vector2, hem: HalfEdgeMesh, camera: Camera3D) -> 
 		var proj:  float   = (local_hit - _drag_centroid).dot(axis)
 		var delta: Vector3 = axis * (proj - _drag_start_proj)
 		drag_world_delta = object_transform.basis * delta
-		for i in _drag_indices.size():
-			hem.set_vertex_position(_drag_indices[i], _drag_initial_pos[i] + delta)
+		if not skip_vertex_ops:
+			for i in _drag_indices.size():
+				hem.set_vertex_position(_drag_indices[i], _drag_initial_pos[i] + delta)
 	else:
 		var delta: Vector3 = local_hit - _drag_start_hit
 		match _active_part:
@@ -265,8 +268,9 @@ func _continue_drag(mouse_pos: Vector2, hem: HalfEdgeMesh, camera: Camera3D) -> 
 			_AXIS_XZ: delta.y = 0.0
 			_AXIS_YZ: delta.x = 0.0
 		drag_world_delta = object_transform.basis * delta
-		for i in _drag_indices.size():
-			hem.set_vertex_position(_drag_indices[i], _drag_initial_pos[i] + delta)
+		if not skip_vertex_ops:
+			for i in _drag_indices.size():
+				hem.set_vertex_position(_drag_indices[i], _drag_initial_pos[i] + delta)
 
 func _plane_normal(part: int) -> Vector3:
 	match part:

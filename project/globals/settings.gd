@@ -17,7 +17,6 @@ func _save() -> void:
 	_cfg.save(PATH)
 
 # --- Categories ---
-
 class ViewportSettings:
 	var _s
 	func _init(s) -> void: _s = s
